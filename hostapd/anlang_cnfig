@@ -26,7 +26,7 @@ CONFIG_DRIVER_NL80211_QCA=y
 #
 #CFLAGS += -I$<path to libnl include files>
 CFLAGS += -I/usr/include/libnl3/
-#LIBS += -L$<path to libnl library files>
+LIBS += -L/lib/arm-linux-gnueabihf/
 
 # Use libnl v2.0 (or 3.0) libraries.
 #CONFIG_LIBNL20=y
