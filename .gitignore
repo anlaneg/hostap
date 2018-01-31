@@ -32,4 +32,7 @@ wlantest/libwlantest.a
 wlantest/test_vectors
 wlantest/wlantest
 wlantest/wlantest_cli
+.cproject
+.project
+.settings/
 **/parallel-vm.log
