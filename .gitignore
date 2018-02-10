@@ -36,3 +36,4 @@ wlantest/wlantest_cli
 .project
 .settings/
 **/parallel-vm.log
+.autotools
