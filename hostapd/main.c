@@ -508,7 +508,7 @@ static const char * hostapd_msg_ifname_cb(void *ctx)
 	return NULL;
 }
 
-
+//通过参数设置iface_path,iface_name（以最后一个'/'划分）
 static int hostapd_get_global_ctrl_iface(struct hapd_interfaces *interfaces,
 					 const char *path)
 {
@@ -522,8 +522,10 @@ static int hostapd_get_global_ctrl_iface(struct hapd_interfaces *interfaces,
 		return -1;
 
 #ifndef CONFIG_CTRL_IFACE_UDP
+	//反方向查找'/'符
 	pos = os_strrchr(interfaces->global_iface_path, '/');
 	if (pos == NULL) {
+		//未发现'/'符，报错
 		wpa_printf(MSG_ERROR, "No '/' in the global control interface "
 			   "file");
 		os_free(interfaces->global_iface_path);
@@ -531,14 +533,16 @@ static int hostapd_get_global_ctrl_iface(struct hapd_interfaces *interfaces,
 		return -1;
 	}
 
+	//设置global_iface_path
 	*pos = '\0';
+	//设置接口名称（在path之后）
 	interfaces->global_iface_name = pos + 1;
 #endif /* !CONFIG_CTRL_IFACE_UDP */
 
 	return 0;
 }
 
-
+//设置组id到ctrl_iface_group
 static int hostapd_get_ctrl_iface_group(struct hapd_interfaces *interfaces,
 					const char *group)
 {
@@ -554,7 +558,8 @@ static int hostapd_get_ctrl_iface_group(struct hapd_interfaces *interfaces,
 	return 0;
 }
 
-
+//按‘，’号分隔args,将分隔后的内容存放在if_names指针数组里，
+//出参if_names_size指出数组长度
 static int hostapd_get_interface_names(char ***if_names,
 				       size_t *if_names_size,
 				       char *arg)
@@ -576,8 +581,8 @@ static int hostapd_get_interface_names(char ***if_names,
 		(*if_names)[*if_names_size] = os_strdup(if_name);
 		if (!(*if_names)[*if_names_size])
 			goto fail;
-		(*if_names_size)++;
-		if_name = strtok_r(NULL, ",", &tmp);
+		(*if_names_size)++;//if_names是个指针数组，if_names_size是数组下标
+		if_name = strtok_r(NULL, ",", &tmp);//取下一个接口名称
 	}
 
 	return 0;
@@ -642,7 +647,7 @@ int main(int argc, char *argv[])
 	size_t i, j;
 	int c, debug = 0, daemonize = 0;
 	char *pid_file = NULL;
-	const char *log_file = NULL;
+	const char *log_file = NULL;//日志文件
 	const char *entropy_file = NULL;
 	char **bss_config = NULL, **tmp_bss;
 	size_t num_bss_configs = 0;
@@ -653,6 +658,7 @@ int main(int argc, char *argv[])
 	char **if_names = NULL;
 	size_t if_names_size = 0;
 
+	//仅android有处理
 	if (os_program_init())
 		return -1;
 
@@ -680,6 +686,7 @@ int main(int argc, char *argv[])
 			break;
 		switch (c) {
 		case 'h':
+			//显示帮助信息
 			usage();
 			break;
 		case 'd':
@@ -694,12 +701,14 @@ int main(int argc, char *argv[])
 			entropy_file = optarg;
 			break;
 		case 'f':
+			//设置日志文件路径
 			log_file = optarg;
 			break;
 		case 'K':
 			wpa_debug_show_keys++;
 			break;
 		case 'P':
+			//设置pid文件位置
 			os_free(pid_file);
 			pid_file = os_rel2abs_path(optarg);
 			break;
@@ -712,18 +721,22 @@ int main(int argc, char *argv[])
 			break;
 #endif /* CONFIG_DEBUG_LINUX_TRACING */
 		case 'v':
+			//显示版本
 			show_version();
 			exit(1);
 			break;
 		case 'g':
+			//设置控制路径，控制接口名称
 			if (hostapd_get_global_ctrl_iface(&interfaces, optarg))
 				return -1;
 			break;
 		case 'G':
+			//设置控制接口组id
 			if (hostapd_get_ctrl_iface_group(&interfaces, optarg))
 				return -1;
 			break;
 		case 'b':
+			//设置多个b配置
 			tmp_bss = os_realloc_array(bss_config,
 						   num_bss_configs + 1,
 						   sizeof(char *));
@@ -745,6 +758,7 @@ int main(int argc, char *argv[])
 			return gen_uuid(optarg);
 #endif /* CONFIG_WPS */
 		case 'i':
+			//解析接口名称，存入if_names数组
 			if (hostapd_get_interface_names(&if_names,
 							&if_names_size, optarg))
 				goto out;
@@ -757,10 +771,11 @@ int main(int argc, char *argv[])
 
 	if (optind == argc && interfaces.global_iface_path == NULL &&
 	    num_bss_configs == 0)
-		usage();
+		usage();//所有参数已完成解析，但
 
 	wpa_msg_register_ifname_cb(hostapd_msg_ifname_cb);
 
+	//如果配置了日志文件，打开日志文件
 	if (log_file)
 		wpa_debug_open_file(log_file);
 	else

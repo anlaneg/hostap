@@ -19,6 +19,7 @@ struct dl_list {
 
 #define DL_LIST_HEAD_INIT(l) { &(l), &(l) }
 
+//双链表初始化
 static inline void dl_list_init(struct dl_list *list)
 {
 	list->next = list;

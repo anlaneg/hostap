@@ -535,7 +535,7 @@ int wpa_debug_reopen_file(void)
 #endif /* CONFIG_DEBUG_FILE */
 }
 
-
+//打开debug文件
 int wpa_debug_open_file(const char *path)
 {
 #ifdef CONFIG_DEBUG_FILE

@@ -45,7 +45,7 @@ struct hapd_interfaces {
 	char *global_iface_path;
 	char *global_iface_name;
 #ifndef CONFIG_NATIVE_WINDOWS
-	gid_t ctrl_iface_group;
+	gid_t ctrl_iface_group;//所属组
 #endif /* CONFIG_NATIVE_WINDOWS */
 	struct hostapd_iface **iface;
 
