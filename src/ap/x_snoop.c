@@ -62,7 +62,7 @@ int x_snoop_init(struct hostapd_data *hapd)
 	return 0;
 }
 
-
+//实现对conf->bridge桥上，dhcp,nd协议报文的收取
 struct l2_packet_data *
 x_snoop_get_l2_packet(struct hostapd_data *hapd,
 		      void (*handler)(void *ctx, const u8 *src_addr,
@@ -72,6 +72,7 @@ x_snoop_get_l2_packet(struct hostapd_data *hapd,
 	struct hostapd_bss_config *conf = hapd->conf;
 	struct l2_packet_data *l2;
 
+	//自桥上收取所有报文（含2层报文头），执行回调为handler
 	l2 = l2_packet_init(conf->bridge, NULL, ETH_P_ALL, handler, hapd, 1);
 	if (l2 == NULL) {
 		wpa_printf(MSG_DEBUG,
@@ -80,6 +81,7 @@ x_snoop_get_l2_packet(struct hostapd_data *hapd,
 		return NULL;
 	}
 
+	//上面实现了l2层报文全接收，这里为其添加过滤器，仅收取指定格式的文件（目前支持dhcp,ndisc协议）
 	if (l2_packet_set_packet_filter(l2, type)) {
 		wpa_printf(MSG_DEBUG,
 			   "x_snoop: Failed to set L2 packet filter for type: %d",

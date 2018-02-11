@@ -64,18 +64,18 @@ struct eloop_signal {
 	int sig;
 	void *user_data;
 	eloop_signal_handler handler;
-	int signaled;
+	int signaled;//指明此信号在未绝期间触发了多少次
 };
 
 struct eloop_sock_table {
-	int count;
-	struct eloop_sock *table;
-	eloop_event_type type;
-	int changed;
+	int count;//表项数
+	struct eloop_sock *table;//数组类型的eloop_sock
+	eloop_event_type type;//表类型（读，写，异常）
+	int changed;//表内容是否发生了变化
 };
 
 struct eloop_data {
-	int max_sock;
+	int max_sock;//记录数组中最大的socket fd (为了照顾select的情绪啊）
 
 	int count; /* sum of all table counts */
 #ifdef CONFIG_ELOOP_POLL
@@ -98,18 +98,19 @@ struct eloop_data {
 	int kqueue_nevents;
 	struct kevent *kqueue_events;
 #endif /* CONFIG_ELOOP_KQUEUE */
+	//读写异常表（保存相应sock)
 	struct eloop_sock_table readers;
 	struct eloop_sock_table writers;
 	struct eloop_sock_table exceptions;
 
-	struct dl_list timeout;
+	struct dl_list timeout;//定时器链表
 
-	int signal_count;
-	struct eloop_signal *signals;
-	int signaled;
-	int pending_terminate;
+	int signal_count;//信号处理数组大小
+	struct eloop_signal *signals;//信号处理数组
+	int signaled;//一共有多少信号发生
+	int pending_terminate;//正在等待循环结束
 
-	int terminate;
+	int terminate;//eloop循环是否需要中止
 };
 
 static struct eloop_data eloop;
@@ -249,7 +250,7 @@ static int eloop_sock_queue(int sock, eloop_event_type type)
 }
 #endif /* CONFIG_ELOOP_KQUEUE */
 
-
+//添加socket
 static int eloop_sock_table_add_sock(struct eloop_sock_table *table,
                                      int sock, eloop_sock_handler handler,
                                      void *eloop_data, void *user_data)
@@ -346,6 +347,7 @@ static int eloop_sock_table_add_sock(struct eloop_sock_table *table,
 #endif /* CONFIG_ELOOP_KQUEUE */
 
 	eloop_trace_sock_remove_ref(table);
+	//realloc 表项，扩大socket数组
 	tmp = os_realloc_array(table->table, table->count + 1,
 			       sizeof(struct eloop_sock));
 	if (tmp == NULL) {
@@ -353,12 +355,13 @@ static int eloop_sock_table_add_sock(struct eloop_sock_table *table,
 		return -1;
 	}
 
+	//构造最后一个表项
 	tmp[table->count].sock = sock;
 	tmp[table->count].eloop_data = eloop_data;
 	tmp[table->count].user_data = user_data;
 	tmp[table->count].handler = handler;
 	wpa_trace_record(&tmp[table->count]);
-	table->count++;
+	table->count++;//表项数增加
 	table->table = tmp;
 	eloop.max_sock = new_max_sock;
 	eloop.count++;
@@ -580,7 +583,7 @@ static void eloop_sock_table_set_fds(struct eloop_sock_table *table,
 	}
 }
 
-
+//触发fd回调
 static void eloop_sock_table_dispatch(struct eloop_sock_table *table,
 				      fd_set *fds)
 {
@@ -592,6 +595,7 @@ static void eloop_sock_table_dispatch(struct eloop_sock_table *table,
 	table->changed = 0;
 	for (i = 0; i < table->count; i++) {
 		if (FD_ISSET(table->table[i].sock, fds)) {
+			//触发fd回调
 			table->table[i].handler(table->table[i].sock,
 						table->table[i].eloop_data,
 						table->table[i].user_data);
@@ -722,6 +726,7 @@ void eloop_unregister_read_sock(int sock)
 }
 
 
+//依据fd的不同类型，返回不同的表
 static struct eloop_sock_table *eloop_get_sock_table(eloop_event_type type)
 {
 	switch (type) {
@@ -758,7 +763,7 @@ void eloop_unregister_sock(int sock, eloop_event_type type)
 	eloop_sock_table_remove_sock(table, sock);
 }
 
-
+//定时器注册
 int eloop_register_timeout(unsigned int secs, unsigned int usecs,
 			   eloop_timeout_handler handler,
 			   void *eloop_data, void *user_data)
@@ -769,6 +774,7 @@ int eloop_register_timeout(unsigned int secs, unsigned int usecs,
 	timeout = os_zalloc(sizeof(*timeout));
 	if (timeout == NULL)
 		return -1;
+	//定时器过期时间填充
 	if (os_get_reltime(&timeout->time) < 0) {
 		os_free(timeout);
 		return -1;
@@ -776,6 +782,7 @@ int eloop_register_timeout(unsigned int secs, unsigned int usecs,
 	now_sec = timeout->time.sec;
 	timeout->time.sec += secs;
 	if (timeout->time.sec < now_sec) {
+		//定时器时间越界
 		/*
 		 * Integer overflow - assume long enough timeout to be assumed
 		 * to be infinite, i.e., the timeout would never happen.
@@ -790,6 +797,8 @@ int eloop_register_timeout(unsigned int secs, unsigned int usecs,
 		timeout->time.sec++;
 		timeout->time.usec -= 1000000;
 	}
+
+	//填充定时器回调用参数
 	timeout->eloop_data = eloop_data;
 	timeout->user_data = user_data;
 	timeout->handler = handler;
@@ -798,12 +807,14 @@ int eloop_register_timeout(unsigned int secs, unsigned int usecs,
 	wpa_trace_record(timeout);
 
 	/* Maintain timeouts in order of increasing time */
+	//沿超时链，找到一个合适的位置，将其插入
 	dl_list_for_each(tmp, &eloop.timeout, struct eloop_timeout, list) {
 		if (os_reltime_before(&timeout->time, &tmp->time)) {
 			dl_list_add(tmp->list.prev, &timeout->list);
 			return 0;
 		}
 	}
+	//链表为空时（或者自已最大时），直接加入到结尾
 	dl_list_add_tail(&eloop.timeout, &timeout->list);
 
 	return 0;
@@ -969,12 +980,13 @@ static void eloop_handle_signal(int sig)
 	if ((sig == SIGINT || sig == SIGTERM) && !eloop.pending_terminate) {
 		/* Use SIGALRM to break out from potential busy loops that
 		 * would not allow the program to be killed. */
-		eloop.pending_terminate = 1;
-		signal(SIGALRM, eloop_handle_alarm);
+		eloop.pending_terminate = 1;//置为需要事件模型退出
+		signal(SIGALRM, eloop_handle_alarm);//添加alarm处理
 		alarm(2);
 	}
 #endif /* CONFIG_NATIVE_WINDOWS */
 
+	//增加信号触发
 	eloop.signaled++;
 	for (i = 0; i < eloop.signal_count; i++) {
 		if (eloop.signals[i].sig == sig) {
@@ -1009,29 +1021,32 @@ static void eloop_process_pending_signals(void)
 	}
 }
 
-
+//实现信号注册（将信号放入loop中统一进行事件处理）
 int eloop_register_signal(int sig, eloop_signal_handler handler,
 			  void *user_data)
 {
 	struct eloop_signal *tmp;
 
+	//增加信号处理表大小
 	tmp = os_realloc_array(eloop.signals, eloop.signal_count + 1,
 			       sizeof(struct eloop_signal));
 	if (tmp == NULL)
 		return -1;
 
+	//注册信号处理
 	tmp[eloop.signal_count].sig = sig;
 	tmp[eloop.signal_count].user_data = user_data;
 	tmp[eloop.signal_count].handler = handler;
 	tmp[eloop.signal_count].signaled = 0;
 	eloop.signal_count++;
 	eloop.signals = tmp;
+	//采用eloop_handle_signal来做实际的信号注册
 	signal(sig, eloop_handle_signal);
 
 	return 0;
 }
 
-
+//eloop信号注册（SIGINT,SIGTRM)
 int eloop_register_signal_terminate(eloop_signal_handler handler,
 				    void *user_data)
 {
@@ -1080,6 +1095,7 @@ void eloop_run(void)
 		goto out;
 #endif /* CONFIG_ELOOP_SELECT */
 
+	//如果eloop不中五，且定时器链表不为空，且有fd事件需要处理，则进行入
 	while (!eloop.terminate &&
 	       (!dl_list_empty(&eloop.timeout) || eloop.readers.count > 0 ||
 		eloop.writers.count > 0 || eloop.exceptions.count > 0)) {
@@ -1098,18 +1114,22 @@ void eloop_run(void)
 				break;
 		}
 
+		//取定时器链表头
 		timeout = dl_list_first(&eloop.timeout, struct eloop_timeout,
 					list);
 		if (timeout) {
 			os_get_reltime(&now);
 			if (os_reltime_before(&now, &timeout->time))
+				//不到超时时间，取差值tv
 				os_reltime_sub(&timeout->time, &now, &tv);
 			else
+				//已过超时间间，取0
 				tv.sec = tv.usec = 0;
 #if defined(CONFIG_ELOOP_POLL) || defined(CONFIG_ELOOP_EPOLL)
 			timeout_ms = tv.sec * 1000 + tv.usec / 1000;
 #endif /* defined(CONFIG_ELOOP_POLL) || defined(CONFIG_ELOOP_EPOLL) */
 #ifdef CONFIG_ELOOP_SELECT
+			//填充超时时间
 			_tv.tv_sec = tv.sec;
 			_tv.tv_usec = tv.usec;
 #endif /* CONFIG_ELOOP_SELECT */
@@ -1128,9 +1148,11 @@ void eloop_run(void)
 			   timeout ? timeout_ms : -1);
 #endif /* CONFIG_ELOOP_POLL */
 #ifdef CONFIG_ELOOP_SELECT
+		//由readers,writers,exceptions表填充rfds,wfds,efds表
 		eloop_sock_table_set_fds(&eloop.readers, rfds);
 		eloop_sock_table_set_fds(&eloop.writers, wfds);
 		eloop_sock_table_set_fds(&eloop.exceptions, efds);
+		//如果无timeout,则超时时间为NULL，即不超时
 		res = select(eloop.max_sock + 1, rfds, wfds, efds,
 			     timeout ? &_tv : NULL);
 #endif /* CONFIG_ELOOP_SELECT */
@@ -1152,6 +1174,7 @@ void eloop_run(void)
 		}
 #endif /* CONFIG_ELOOP_KQUEUE */
 		if (res < 0 && errno != EINTR && errno != 0) {
+			//select出错，报错
 			wpa_printf(MSG_ERROR, "eloop: %s: %s",
 #ifdef CONFIG_ELOOP_POLL
 				   "poll"
@@ -1178,16 +1201,20 @@ void eloop_run(void)
 
 
 		/* check if some registered timeouts have occurred */
+		//等待fd完成，先考虑定时器
 		timeout = dl_list_first(&eloop.timeout, struct eloop_timeout,
 					list);
 		if (timeout) {
 			os_get_reltime(&now);
 			if (!os_reltime_before(&now, &timeout->time)) {
+				//timeout节点已过期，执行其对应回调
 				void *eloop_data = timeout->eloop_data;
 				void *user_data = timeout->user_data;
 				eloop_timeout_handler handler =
 					timeout->handler;
-				eloop_remove_timeout(timeout);
+				//删除定时器
+				eloop_remove_timeout(timeout);、
+				//执行定时器指明的回调
 				handler(eloop_data, user_data);
 			}
 
@@ -1196,6 +1223,8 @@ void eloop_run(void)
 		if (res <= 0)
 			continue;
 
+		//上层修改了readers,writers,exceptions表
+		//见注释说明
 		if (eloop.readers.changed ||
 		    eloop.writers.changed ||
 		    eloop.exceptions.changed) {
@@ -1215,6 +1244,7 @@ void eloop_run(void)
 					  eloop.max_pollfd_map);
 #endif /* CONFIG_ELOOP_POLL */
 #ifdef CONFIG_ELOOP_SELECT
+		//处理fd事件
 		eloop_sock_table_dispatch(&eloop.readers, rfds);
 		eloop_sock_table_dispatch(&eloop.writers, wfds);
 		eloop_sock_table_dispatch(&eloop.exceptions, efds);

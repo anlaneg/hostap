@@ -66,6 +66,7 @@ static inline void os_time_sub(struct os_time *a, struct os_time *b,
 
 /* Helpers for handling struct os_reltime */
 
+//时间a是否小于时间b
 static inline int os_reltime_before(struct os_reltime *a,
 				    struct os_reltime *b)
 {

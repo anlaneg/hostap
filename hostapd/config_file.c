@@ -2100,7 +2100,7 @@ static unsigned int parse_tls_flags(const char *val)
 }
 #endif /* EAP_SERVER */
 
-
+//检查配置项，设置配置值
 static int hostapd_config_fill(struct hostapd_config *conf,
 			       struct hostapd_bss_config *bss,
 			       const char *buf, char *pos, int line)
@@ -2109,6 +2109,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		os_strlcpy(conf->bss[0]->iface, pos,
 			   sizeof(conf->bss[0]->iface));
 	} else if (os_strcmp(buf, "bridge") == 0) {
+		//设置配置的桥
 		os_strlcpy(bss->bridge, pos, sizeof(bss->bridge));
 	} else if (os_strcmp(buf, "vlan_bridge") == 0) {
 		os_strlcpy(bss->vlan_bridge, pos, sizeof(bss->vlan_bridge));
@@ -2117,13 +2118,14 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 	} else if (os_strcmp(buf, "driver") == 0) {
 		int j;
 		const struct wpa_driver_ops *driver = NULL;
-
+		//查找配置的驱动
 		for (j = 0; wpa_drivers[j]; j++) {
 			if (os_strcmp(pos, wpa_drivers[j]->name) == 0) {
 				driver = wpa_drivers[j];
 				break;
 			}
 		}
+	   //驱动没有查找到
 		if (!driver) {
 			wpa_printf(MSG_ERROR,
 				   "Line %d: invalid/unknown driver '%s'",
@@ -3870,6 +3872,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
  * @fname: Configuration file name (including path, if needed)
  * Returns: Allocated configuration data structure
  */
+//读取配置文件，返回配值
 struct hostapd_config * hostapd_config_read(const char *fname)
 {
 	struct hostapd_config *conf;
@@ -3893,8 +3896,9 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 	}
 
 	/* set default driver based on configuration */
-	conf->driver = wpa_drivers[0];
+	conf->driver = wpa_drivers[0];//默认驱动为wpa_drivers[0],即nl80211
 	if (conf->driver == NULL) {
+		//wap_drivers数组为空，报错
 		wpa_printf(MSG_ERROR, "No driver wrappers registered!");
 		hostapd_config_free(conf);
 		fclose(f);
@@ -3903,15 +3907,17 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 
 	conf->last_bss = conf->bss[0];
 
+	//自配置文件中取一行数据(不支持超过4096未换行的配置）
 	while (fgets(buf, sizeof(buf), f)) {
 		struct hostapd_bss_config *bss;
 
 		bss = conf->last_bss;
-		line++;
+		line++;//行号增加
 
 		if (buf[0] == '#')
-			continue;
+			continue;//跳过注释行
 		pos = buf;
+		//将本行的'\n'改为'\0'
 		while (*pos != '\0') {
 			if (*pos == '\n') {
 				*pos = '\0';
@@ -3919,9 +3925,11 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 			}
 			pos++;
 		}
+		//忽略空行
 		if (buf[0] == '\0')
 			continue;
 
+		//找到‘＝’号，用于区分key,value
 		pos = os_strchr(buf, '=');
 		if (pos == NULL) {
 			wpa_printf(MSG_ERROR, "Line %d: invalid line '%s'",
@@ -3931,6 +3939,7 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 		}
 		*pos = '\0';
 		pos++;
+		//此时buf为key,pos为value,line为行号
 		errors += hostapd_config_fill(conf, bss, buf, pos, line);
 	}
 

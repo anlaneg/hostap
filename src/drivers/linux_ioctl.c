@@ -200,12 +200,13 @@ int linux_br_del_if(int sock, const char *brname, const char *ifname)
 	return 0;
 }
 
-
+//获取包含ifname的桥名称
 int linux_br_get(char *brname, const char *ifname)
 {
 	char path[128], brlink[128], *pos;
 	ssize_t res;
 
+	//接口ifname已被加入桥中，故其有brport目录,bridge是一个link指向对应的桥设备
 	os_snprintf(path, sizeof(path), "/sys/class/net/%s/brport/bridge",
 		    ifname);
 	res = readlink(path, brlink, sizeof(brlink));

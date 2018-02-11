@@ -11,10 +11,11 @@
 #include "driver.h"
 
 
+//定义当前支持的driver
 const struct wpa_driver_ops *const wpa_drivers[] =
 {
 #ifdef CONFIG_DRIVER_NL80211
-	&wpa_driver_nl80211_ops,
+	&wpa_driver_nl80211_ops,//注册nl80211驱动
 #endif /* CONFIG_DRIVER_NL80211 */
 #ifdef CONFIG_DRIVER_WEXT
 	&wpa_driver_wext_ops,

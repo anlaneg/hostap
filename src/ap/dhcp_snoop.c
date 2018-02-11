@@ -135,9 +135,10 @@ static void handle_dhcp(void *ctx, const u8 *src_addr, const u8 *buf,
 	}
 }
 
-
+//初始化dhcp snooping功能
 int dhcp_snoop_init(struct hostapd_data *hapd)
 {
+	//收取conf->bridge上所有的dhcp报文，采用handle_dhcp进行处理
 	hapd->sock_dhcp = x_snoop_get_l2_packet(hapd, handle_dhcp,
 						L2_PACKET_FILTER_DHCP);
 	if (hapd->sock_dhcp == NULL) {

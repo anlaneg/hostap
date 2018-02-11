@@ -21,12 +21,14 @@
 
 struct l2_packet_data {
 	int fd; /* packet socket for EAPOL frames */
-	char ifname[IFNAMSIZ + 1];
-	int ifindex;
-	u8 own_addr[ETH_ALEN];
+	char ifname[IFNAMSIZ + 1];//接口名称
+	int ifindex;//接口ifindex
+	u8 own_addr[ETH_ALEN];//接口mac地址
+	//用户可见的收包回调
 	void (*rx_callback)(void *ctx, const u8 *src_addr,
 			    const u8 *buf, size_t len);
 	void *rx_callback_ctx;
+	//是否包含2层报头
 	int l2_hdr; /* whether to include layer 2 (Ethernet) header data
 		     * buffers */
 
@@ -61,6 +63,7 @@ static struct sock_filter dhcp_sock_filter_insns[] = {
 	{ 0x6, 0, 0, 0x00000000 },
 };
 
+//dhcp过滤
 static const struct sock_fprog dhcp_sock_filter = {
 	.len = ARRAY_SIZE(dhcp_sock_filter_insns),
 	.filter = dhcp_sock_filter_insns,
@@ -124,7 +127,7 @@ int l2_packet_send(struct l2_packet_data *l2, const u8 *dst_addr, u16 proto,
 	return ret;
 }
 
-
+//从指定接口收取报文（采用raw socket方式收取）
 static void l2_packet_receive(int sock, void *eloop_ctx, void *sock_ctx)
 {
 	struct l2_packet_data *l2 = eloop_ctx;
@@ -136,7 +139,7 @@ static void l2_packet_receive(int sock, void *eloop_ctx, void *sock_ctx)
 	os_memset(&ll, 0, sizeof(ll));
 	fromlen = sizeof(ll);
 	res = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *) &ll,
-		       &fromlen);
+		       &fromlen);//收包
 	if (res < 0) {
 		wpa_printf(MSG_DEBUG, "l2_packet_receive - recvfrom: %s",
 			   strerror(errno));
@@ -188,6 +191,7 @@ static void l2_packet_receive(int sock, void *eloop_ctx, void *sock_ctx)
 
 	l2->last_from_br = 0;
 #endif /* CONFIG_NO_LINUX_PACKET_SOCKET_WAR */
+	//收到报文，执行收包回调
 	l2->rx_callback(l2->rx_callback_ctx, ll.sll_addr, buf, res);
 }
 
@@ -245,11 +249,12 @@ static void l2_packet_receive_br(int sock, void *eloop_ctx, void *sock_ctx)
 #endif /* CONFIG_NO_LINUX_PACKET_SOCKET_WAR */
 
 
+//实现raw socket报文收取，
 struct l2_packet_data * l2_packet_init(
-	const char *ifname, const u8 *own_addr, unsigned short protocol,
-	void (*rx_callback)(void *ctx, const u8 *src_addr,
+	const char *ifname, const u8 *own_addr, unsigned short protocol,//ifname,接口名称，protocol要读取的协议
+	void (*rx_callback)(void *ctx, const u8 *src_addr, //rx_callback 当报文来临时，调用的收包回调
 			    const u8 *buf, size_t len),
-	void *rx_callback_ctx, int l2_hdr)
+	void *rx_callback_ctx, int l2_hdr)//rx_callback_ctx 收报文回调上下文，l2_hdr是否包含2层报头
 {
 	struct l2_packet_data *l2;
 	struct ifreq ifr;
@@ -266,6 +271,7 @@ struct l2_packet_data * l2_packet_init(
 	l2->fd_br_rx = -1;
 #endif /* CONFIG_NO_LINUX_PACKET_SOCKET_WAR */
 
+	//按要求除了socket
 	l2->fd = socket(PF_PACKET, l2_hdr ? SOCK_RAW : SOCK_DGRAM,
 			htons(protocol));
 	if (l2->fd < 0) {
@@ -274,6 +280,7 @@ struct l2_packet_data * l2_packet_init(
 		os_free(l2);
 		return NULL;
 	}
+	//提取接口ifname的ifindex
 	os_memset(&ifr, 0, sizeof(ifr));
 	os_strlcpy(ifr.ifr_name, l2->ifname, sizeof(ifr.ifr_name));
 	if (ioctl(l2->fd, SIOCGIFINDEX, &ifr) < 0) {
@@ -289,6 +296,7 @@ struct l2_packet_data * l2_packet_init(
 	ll.sll_family = PF_PACKET;
 	ll.sll_ifindex = ifr.ifr_ifindex;
 	ll.sll_protocol = htons(protocol);
+	//将socket绑定到对应的接口上
 	if (bind(l2->fd, (struct sockaddr *) &ll, sizeof(ll)) < 0) {
 		wpa_printf(MSG_ERROR, "%s: bind[PF_PACKET]: %s",
 			   __func__, strerror(errno));
@@ -297,6 +305,7 @@ struct l2_packet_data * l2_packet_init(
 		return NULL;
 	}
 
+	//提取接口的mac地址
 	if (ioctl(l2->fd, SIOCGIFHWADDR, &ifr) < 0) {
 		wpa_printf(MSG_ERROR, "%s: ioctl[SIOCGIFHWADDR]: %s",
 			   __func__, strerror(errno));
@@ -306,6 +315,7 @@ struct l2_packet_data * l2_packet_init(
 	}
 	os_memcpy(l2->own_addr, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
 
+	//注册接口的读取事件（用于自接口收包）
 	eloop_register_read_sock(l2->fd, l2_packet_receive, l2, NULL);
 
 	return l2;
@@ -455,7 +465,7 @@ void l2_packet_notify_auth_start(struct l2_packet_data *l2)
 {
 }
 
-
+//设置报文过滤
 int l2_packet_set_packet_filter(struct l2_packet_data *l2,
 				enum l2_packet_filter_type type)
 {

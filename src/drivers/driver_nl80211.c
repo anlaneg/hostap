@@ -1920,6 +1920,7 @@ static void * wpa_driver_nl80211_drv_init(void *ctx, const char *ifname,
 
 	if (drv->global) {
 		nl80211_check_global(drv->global);
+		//将driver加入
 		dl_list_add(&drv->global->interfaces, &drv->list);
 		drv->in_interface_list = 1;
 	}
@@ -6342,11 +6343,13 @@ static void add_ifidx(struct wpa_driver_nl80211_data *drv, int ifidx,
 	wpa_printf(MSG_DEBUG,
 		   "nl80211: Add own interface ifindex %d (ifidx_reason %d)",
 		   ifidx, ifidx_reason);
+	//检查此ifidx是否已存在，如果存在，则加入完成
 	if (have_ifidx(drv, ifidx, ifidx_reason)) {
 		wpa_printf(MSG_DEBUG, "nl80211: ifindex %d already in the list",
 			   ifidx);
 		return;
 	}
+	//找一个空的位置，存此ifidx
 	for (i = 0; i < drv->num_if_indices; i++) {
 		if (drv->if_indices[i] == 0) {
 			drv->if_indices[i] = ifidx;
@@ -6573,18 +6576,21 @@ static void *i802_init(struct hostapd_data *hapd,
 	drv = bss->drv;
 
 	if (linux_br_get(master_ifname, params->ifname) == 0) {
+		//ifname被绑定在bridge上时
 		wpa_printf(MSG_DEBUG, "nl80211: Interface %s is in bridge %s",
 			   params->ifname, master_ifname);
-		br_ifindex = if_nametoindex(master_ifname);
-		os_strlcpy(bss->brname, master_ifname, IFNAMSIZ);
+		br_ifindex = if_nametoindex(master_ifname);//取桥设备的ifindex
+		os_strlcpy(bss->brname, master_ifname, IFNAMSIZ);//设置桥名称
 	} else if ((params->num_bridge == 0 || !params->bridge[0]) &&
 		   linux_master_get(master_ifname, params->ifname) == 0) {
+		//ifname是某个接口的成员
 		wpa_printf(MSG_DEBUG, "nl80211: Interface %s is in master %s",
 			params->ifname, master_ifname);
 		/* start listening for EAPOL on the master interface */
 		add_ifidx(drv, if_nametoindex(master_ifname), drv->ifindex);
 
 		/* check if master itself is under bridge */
+		//检查master是否在桥上
 		if (linux_br_get(master_ifname, master_ifname) == 0) {
 			wpa_printf(MSG_DEBUG, "nl80211: which is in bridge %s",
 				   master_ifname);
@@ -6592,6 +6598,7 @@ static void *i802_init(struct hostapd_data *hapd,
 			os_strlcpy(bss->brname, master_ifname, IFNAMSIZ);
 		}
 	} else {
+		//master接口不存在
 		master_ifname[0] = '\0';
 	}
 
@@ -7560,6 +7567,7 @@ static void * nl80211_global_init(void *ctx)
 	if (wpa_driver_nl80211_init_nl_global(global) < 0)
 		goto err;
 
+	//创建socket,用于接口配置
 	global->ioctl_sock = socket(PF_INET, SOCK_DGRAM, 0);
 	if (global->ioctl_sock < 0) {
 		wpa_printf(MSG_ERROR, "nl80211: socket(PF_INET,SOCK_DGRAM) failed: %s",
@@ -10470,6 +10478,7 @@ fail:
 }
 
 
+//定义nl80211驱动
 const struct wpa_driver_ops wpa_driver_nl80211_ops = {
 	.name = "nl80211",
 	.desc = "Linux nl80211/cfg80211",
@@ -10484,7 +10493,7 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
 	.deauthenticate = driver_nl80211_deauthenticate,
 	.authenticate = driver_nl80211_authenticate,
 	.associate = wpa_driver_nl80211_associate,
-	.global_init = nl80211_global_init,
+	.global_init = nl80211_global_init,//初始化
 	.global_deinit = nl80211_global_deinit,
 	.init2 = wpa_driver_nl80211_init,
 	.deinit = driver_nl80211_deinit,

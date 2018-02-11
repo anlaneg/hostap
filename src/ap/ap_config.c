@@ -127,6 +127,7 @@ void hostapd_config_defaults_bss(struct hostapd_bss_config *bss)
 }
 
 
+//构造空的配置文件（提供默认值）
 struct hostapd_config * hostapd_config_defaults(void)
 {
 #define ecw2cw(ecw) ((1 << (ecw)) - 1)

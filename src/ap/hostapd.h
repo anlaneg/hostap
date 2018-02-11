@@ -31,6 +31,7 @@ struct hostapd_iface;
 
 struct hapd_interfaces {
 	int (*reload_config)(struct hostapd_iface *iface);
+	//负责读取配置文件
 	struct hostapd_config * (*config_read_cb)(const char *config_fname);
 	int (*ctrl_iface_init)(struct hostapd_data *hapd);
 	void (*ctrl_iface_deinit)(struct hostapd_data *hapd);
@@ -388,8 +389,8 @@ struct hostapd_sta_info {
 struct hostapd_iface {
 	struct hapd_interfaces *interfaces;
 	void *owner;
-	char *config_fname;
-	struct hostapd_config *conf;
+	char *config_fname;//配置文件名称
+	struct hostapd_config *conf;//自配置文件中读取到的配置信息
 	char phy[16]; /* Name of the PHY (radio) */
 
 	enum hostapd_iface_state {

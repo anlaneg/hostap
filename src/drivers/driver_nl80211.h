@@ -34,6 +34,7 @@ struct nl80211_global {
 	struct nl_cb *nl_cb;
 	struct nl_handle *nl;
 	int nl80211_id;
+	//执行接口操作用
 	int ioctl_sock; /* socket for ioctl() use */
 
 	struct nl_handle *nl_event;
@@ -54,10 +55,10 @@ struct i802_bss {
 	struct wpa_driver_nl80211_data *drv;
 	struct i802_bss *next;
 	int ifindex;
-	int br_ifindex;
+	int br_ifindex;//ifindex从属的桥，所对应的ifindex(可以不存在，不存在时为0）
 	u64 wdev_id;
 	char ifname[IFNAMSIZ + 1];
-	char brname[IFNAMSIZ];
+	char brname[IFNAMSIZ];//桥名称
 	unsigned int beacon_set:1;
 	unsigned int added_if_into_bridge:1;
 	unsigned int added_bridge:1;

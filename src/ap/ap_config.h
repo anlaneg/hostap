@@ -84,8 +84,8 @@ typedef enum hostap_security_policy {
 } secpolicy;
 
 struct hostapd_ssid {
-	u8 ssid[SSID_MAX_LEN];
-	size_t ssid_len;
+	u8 ssid[SSID_MAX_LEN];//无线ssid
+	size_t ssid_len;//设置ssid长度
 	unsigned int ssid_set:1;
 	unsigned int utf8_ssid:1;
 	unsigned int wpa_passphrase_set:1;
@@ -236,7 +236,7 @@ struct fils_realm {
  */
 struct hostapd_bss_config {
 	char iface[IFNAMSIZ + 1];
-	char bridge[IFNAMSIZ + 1];
+	char bridge[IFNAMSIZ + 1];//桥名称
 	char vlan_bridge[IFNAMSIZ + 1];
 	char wds_bridge[IFNAMSIZ + 1];
 

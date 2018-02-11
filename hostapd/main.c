@@ -174,6 +174,8 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
 		if (wpa_drivers[i] != hapd->driver)
 			continue;
 
+		//初始化与hapd->driver相等的drivers，如果
+		//其已初始化，则跳过
 		if (global.drv_priv[i] == NULL &&
 		    wpa_drivers[i]->global_init) {
 			global.drv_priv[i] =
@@ -268,12 +270,14 @@ hostapd_interface_init(struct hapd_interfaces *interfaces, const char *if_name,
 		return NULL;
 
 	if (if_name) {
+		//参数指定了if_name,替换配置文件中指定的if_name
 		os_strlcpy(iface->conf->bss[0]->iface, if_name,
 			   sizeof(iface->conf->bss[0]->iface));
 	}
 
-	iface->interfaces = interfaces;
+	iface->interfaces = interfaces;//指定接口
 
+	//采用参数指定的debug级别，替换配置中指定的
 	for (k = 0; k < debug; k++) {
 		if (iface->bss[0]->conf->logger_stdout_level > 0)
 			iface->bss[0]->conf->logger_stdout_level--;
@@ -692,7 +696,7 @@ int main(int argc, char *argv[])
 		case 'd':
 			debug++;
 			if (wpa_debug_level > 0)
-				wpa_debug_level--;
+				wpa_debug_level--;//通过增加-d选项，可以提高减少log的级别
 			break;
 		case 'B':
 			daemonize++;
@@ -830,11 +834,13 @@ int main(int argc, char *argv[])
 		if (i < if_names_size)
 			if_name = if_names[i];
 
+		//如果有多个接口，每个接口一个配置文件
 		interfaces.iface[i] = hostapd_interface_init(&interfaces,
 							     if_name,
-							     argv[optind + i],
+							     argv[optind + i],//配置文件路径
 							     debug);
 		if (!interfaces.iface[i]) {
+			//初始化接口失败
 			wpa_printf(MSG_ERROR, "Failed to initialize interface");
 			goto out;
 		}

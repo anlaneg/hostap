@@ -1140,6 +1140,7 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
 			return -1;
 		}
 
+		//初始化dhcp snooping
 		if (dhcp_snoop_init(hapd)) {
 			wpa_printf(MSG_ERROR,
 				   "DHCP snooping initialization failed");
@@ -2235,8 +2236,9 @@ struct hostapd_iface * hostapd_init(struct hapd_interfaces *interfaces,
 
 	hapd_iface->config_fname = os_strdup(config_file);
 	if (hapd_iface->config_fname == NULL)
-		goto fail;
+		goto fail;//配置文件为空或者申请内存失败
 
+	//解析配置文件，并读取其配置
 	conf = interfaces->config_read_cb(hapd_iface->config_fname);
 	if (conf == NULL)
 		goto fail;
