@@ -221,13 +221,14 @@ int linux_br_get(char *brname, const char *ifname)
 	return 0;
 }
 
-
+//通过master目录获取其master
 int linux_master_get(char *master_ifname, const char *ifname)
 {
 	char buf[128], masterlink[128], *pos;
 	ssize_t res;
 
 	/* check whether there is a master */
+	//通过master获取其主设备
 	os_snprintf(buf, sizeof(buf), "/sys/class/net/%s/master", ifname);
 
 	res = readlink(buf, masterlink, sizeof(masterlink));
@@ -236,7 +237,7 @@ int linux_master_get(char *master_ifname, const char *ifname)
 
 	masterlink[res] = '\0';
 
-	pos = os_strrchr(masterlink, '/');
+	pos = os_strrchr(masterlink, '/');//取master名称
 	if (pos == NULL)
 		return -1;
 	pos++;
