@@ -345,6 +345,7 @@ int radio_add_work(struct wpa_supplicant *wpa_s, unsigned int freq,
 void radio_work_done(struct wpa_radio_work *work);
 void radio_remove_works(struct wpa_supplicant *wpa_s,
 			const char *type, int remove_all);
+void radio_remove_pending_work(struct wpa_supplicant *wpa_s, void *ctx);
 void radio_work_check_next(struct wpa_supplicant *wpa_s);
 struct wpa_radio_work *
 radio_work_pending(struct wpa_supplicant *wpa_s, const char *type);
@@ -751,6 +752,7 @@ struct wpa_supplicant {
 	int set_ap_uapsd;
 	int ap_uapsd;
 	int auth_alg;
+	u16 last_owe_group;
 
 #ifdef CONFIG_SME
 	struct {
@@ -788,6 +790,8 @@ struct wpa_supplicant {
 		struct wpabuf *sae_token;
 		int sae_group_index;
 		unsigned int sae_pmksa_caching:1;
+		u16 seq_num;
+		struct external_auth ext_auth;
 #endif /* CONFIG_SAE */
 	} sme;
 #endif /* CONFIG_SME */

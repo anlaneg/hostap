@@ -319,8 +319,8 @@ int hostapd_notif_assoc(struct hostapd_data *hapd, const u8 *addr,
 				reason = WLAN_REASON_INVALID_IE;
 				status = WLAN_STATUS_INVALID_IE;
 			} else if (res == WPA_INVALID_MGMT_GROUP_CIPHER) {
-				reason = WLAN_REASON_GROUP_CIPHER_NOT_VALID;
-				status = WLAN_STATUS_GROUP_CIPHER_NOT_VALID;
+				reason = WLAN_REASON_CIPHER_SUITE_REJECTED;
+				status = WLAN_STATUS_CIPHER_REJECTED_PER_POLICY;
 			}
 #endif /* CONFIG_IEEE80211W */
 			else {
@@ -528,13 +528,21 @@ skip_wpa_check:
 	    elems.owe_dh) {
 		u8 *npos;
 
-		npos = owe_auth_req_process(hapd, sta,
-					    elems.owe_dh, elems.owe_dh_len,
-					    p, &reason);
-		if (!npos)
-			goto fail;
-		p = npos;
-		if (reason != WLAN_STATUS_SUCCESS)
+		npos = owe_assoc_req_process(hapd, sta,
+					     elems.owe_dh, elems.owe_dh_len,
+					     p, sizeof(buf) - (p - buf),
+					     &reason);
+		if (npos)
+			p = npos;
+		if (!npos &&
+		    reason == WLAN_STATUS_FINITE_CYCLIC_GROUP_NOT_SUPPORTED) {
+			status = WLAN_STATUS_FINITE_CYCLIC_GROUP_NOT_SUPPORTED;
+			hostapd_sta_assoc(hapd, addr, reassoc, status, buf,
+					  p - buf);
+			return 0;
+		}
+
+		if (!npos || reason != WLAN_STATUS_SUCCESS)
 			goto fail;
 	}
 #endif /* CONFIG_OWE */
@@ -1114,6 +1122,7 @@ static int hostapd_mgmt_rx(struct hostapd_data *hapd, struct rx_mgmt *rx_mgmt)
 	}
 
 	os_memset(&fi, 0, sizeof(fi));
+	fi.freq = rx_mgmt->freq;
 	fi.datarate = rx_mgmt->datarate;
 	fi.ssi_signal = rx_mgmt->ssi_signal;
 

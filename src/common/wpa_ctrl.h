@@ -176,6 +176,7 @@ extern "C" {
 #define DPP_EVENT_FAIL "DPP-FAIL "
 #define DPP_EVENT_PKEX_T_LIMIT "DPP-PKEX-T-LIMIT "
 #define DPP_EVENT_INTRO "DPP-INTRO "
+#define DPP_EVENT_CONF_REQ_RX "DPP-CONF-REQ-RX "
 
 /* MESH events */
 #define MESH_GROUP_STARTED "MESH-GROUP-STARTED "
@@ -445,7 +446,7 @@ void wpa_ctrl_close(struct wpa_ctrl *ctrl);
  *
  * This function is used to send commands to wpa_supplicant/hostapd. Received
  * response will be written to reply and reply_len is set to the actual length
- * of the reply. This function will block for up to two seconds while waiting
+ * of the reply. This function will block for up to 10 seconds while waiting
  * for the reply. If unsolicited messages are received, the blocking time may
  * be longer.
  *

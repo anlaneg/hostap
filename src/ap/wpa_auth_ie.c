@@ -711,12 +711,6 @@ int wpa_validate_wpa_ie(struct wpa_authenticator *wpa_auth,
 			return WPA_MGMT_FRAME_PROTECTION_VIOLATION;
 		}
 
-		if (ciphers & WPA_CIPHER_TKIP) {
-			wpa_printf(MSG_DEBUG, "Management frame protection "
-				   "cannot use TKIP");
-			return WPA_MGMT_FRAME_PROTECTION_VIOLATION;
-		}
-
 		if (data.mgmt_group_cipher != wpa_auth->conf.group_mgmt_cipher)
 		{
 			wpa_printf(MSG_DEBUG, "Unsupported management group "
@@ -725,11 +719,27 @@ int wpa_validate_wpa_ie(struct wpa_authenticator *wpa_auth,
 		}
 	}
 
+#ifdef CONFIG_SAE
+	if (wpa_auth->conf.ieee80211w == MGMT_FRAME_PROTECTION_OPTIONAL &&
+	    wpa_key_mgmt_sae(sm->wpa_key_mgmt) &&
+	    !(data.capabilities & WPA_CAPABILITY_MFPC)) {
+		wpa_printf(MSG_DEBUG,
+			   "Management frame protection required with SAE, but client did not enable it");
+		return WPA_MGMT_FRAME_PROTECTION_VIOLATION;
+	}
+#endif /* CONFIG_SAE */
+
 	if (wpa_auth->conf.ieee80211w == NO_MGMT_FRAME_PROTECTION ||
 	    !(data.capabilities & WPA_CAPABILITY_MFPC))
 		sm->mgmt_frame_prot = 0;
 	else
 		sm->mgmt_frame_prot = 1;
+
+	if (sm->mgmt_frame_prot && (ciphers & WPA_CIPHER_TKIP)) {
+		    wpa_printf(MSG_DEBUG,
+			       "Management frame protection cannot use TKIP");
+		    return WPA_MGMT_FRAME_PROTECTION_VIOLATION;
+	}
 #endif /* CONFIG_IEEE80211W */
 
 #ifdef CONFIG_IEEE80211R_AP
@@ -816,6 +826,15 @@ int wpa_validate_wpa_ie(struct wpa_authenticator *wpa_auth,
 				 (vlan && vlan->tagged[0]) ? "+" : "");
 		os_memcpy(wpa_auth->dot11RSNAPMKIDUsed, pmkid, PMKID_LEN);
 	}
+
+#ifdef CONFIG_SAE
+	if (sm->wpa_key_mgmt == WPA_KEY_MGMT_SAE && data.num_pmkid &&
+	    !sm->pmksa) {
+		wpa_auth_vlogger(wpa_auth, sm->addr, LOGGER_DEBUG,
+				 "No PMKSA cache entry found for SAE");
+		return WPA_INVALID_PMKID;
+	}
+#endif /* CONFIG_SAE */
 
 #ifdef CONFIG_DPP
 	if (sm->wpa_key_mgmt == WPA_KEY_MGMT_DPP && !sm->pmksa) {

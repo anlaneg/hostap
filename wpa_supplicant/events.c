@@ -487,6 +487,11 @@ static int wpa_supplicant_match_privacy(struct wpa_bss *bss,
 		return 1;
 #endif /* CONFIG_WPS */
 
+#ifdef CONFIG_OWE
+	if ((ssid->key_mgmt & WPA_KEY_MGMT_OWE) && !ssid->owe_only)
+		return 1;
+#endif /* CONFIG_OWE */
+
 	if (has_wep_key(ssid))
 		privacy = 1;
 
@@ -622,7 +627,8 @@ static int wpa_supplicant_ssid_bss_match(struct wpa_supplicant *wpa_s,
 	}
 
 #ifdef CONFIG_IEEE80211W
-	if (wpas_get_ssid_pmf(wpa_s, ssid) == MGMT_FRAME_PROTECTION_REQUIRED) {
+	if (wpas_get_ssid_pmf(wpa_s, ssid) == MGMT_FRAME_PROTECTION_REQUIRED &&
+	    (!(ssid->key_mgmt & WPA_KEY_MGMT_OWE) || ssid->owe_only)) {
 		if (debug_print)
 			wpa_dbg(wpa_s, MSG_DEBUG,
 				"   skip - MFP Required but network not MFP Capable");
@@ -691,6 +697,16 @@ static int wpa_supplicant_ssid_bss_match(struct wpa_supplicant *wpa_s,
 				"   allow for non-WPA IEEE 802.1X");
 		return 1;
 	}
+
+#ifdef CONFIG_OWE
+	if ((ssid->key_mgmt & WPA_KEY_MGMT_OWE) && !ssid->owe_only &&
+	    !wpa_ie && !rsn_ie) {
+		if (debug_print)
+			wpa_dbg(wpa_s, MSG_DEBUG,
+				"   allow in OWE transition mode");
+		return 1;
+	}
+#endif /* CONFIG_OWE */
 
 	if ((ssid->proto & (WPA_PROTO_WPA | WPA_PROTO_RSN)) &&
 	    wpa_key_mgmt_wpa(ssid->key_mgmt) && proto_match == 0) {
@@ -1137,6 +1153,7 @@ struct wpa_ssid * wpa_scan_res_match(struct wpa_supplicant *wpa_s,
 		if (!osen && !wpa &&
 		    !(ssid->key_mgmt & WPA_KEY_MGMT_NONE) &&
 		    !(ssid->key_mgmt & WPA_KEY_MGMT_WPS) &&
+		    !(ssid->key_mgmt & WPA_KEY_MGMT_OWE) &&
 		    !(ssid->key_mgmt & WPA_KEY_MGMT_IEEE8021X_NO_WPA)) {
 			if (debug_print)
 				wpa_dbg(wpa_s, MSG_DEBUG,
@@ -3986,6 +4003,26 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 				data->assoc_reject.timeout_reason : "");
 		wpa_s->assoc_status_code = data->assoc_reject.status_code;
 		wpas_notify_assoc_status_code(wpa_s);
+
+#ifdef CONFIG_OWE
+		if (data->assoc_reject.status_code ==
+		    WLAN_STATUS_FINITE_CYCLIC_GROUP_NOT_SUPPORTED &&
+		    wpa_s->key_mgmt == WPA_KEY_MGMT_OWE &&
+		    wpa_s->current_ssid &&
+		    wpa_s->current_ssid->owe_group == 0 &&
+		    wpa_s->last_owe_group != 21) {
+			struct wpa_ssid *ssid = wpa_s->current_ssid;
+			struct wpa_bss *bss = wpa_s->current_bss;
+
+			wpa_printf(MSG_DEBUG,
+				   "OWE: Try next supported DH group");
+			wpas_connect_work_done(wpa_s);
+			wpa_supplicant_mark_disassoc(wpa_s);
+			wpa_supplicant_connect(wpa_s, bss, ssid);
+			break;
+		}
+#endif /* CONFIG_OWE */
+
 		if (wpa_s->drv_flags & WPA_DRIVER_FLAGS_SME)
 			sme_event_assoc_reject(wpa_s, data);
 		else {
@@ -4230,6 +4267,16 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 				break;
 			}
 
+#ifdef CONFIG_SAE
+			if (stype == WLAN_FC_STYPE_AUTH &&
+			    !(wpa_s->drv_flags & WPA_DRIVER_FLAGS_SME) &&
+			    (wpa_s->drv_flags & WPA_DRIVER_FLAGS_SAE)) {
+				sme_external_auth_mgmt_rx(
+					wpa_s, data->rx_mgmt.frame,
+					data->rx_mgmt.frame_len);
+				break;
+			}
+#endif /* CONFIG_SAE */
 			wpa_dbg(wpa_s, MSG_DEBUG, "AP: ignore received "
 				"management frame in non-AP mode");
 			break;
@@ -4541,6 +4588,15 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 			break;
 		wpa_msg(wpa_s, MSG_INFO, WPA_EVENT_BEACON_LOSS);
 		bgscan_notify_beacon_loss(wpa_s);
+		break;
+	case EVENT_EXTERNAL_AUTH:
+#ifdef CONFIG_SAE
+		if (!wpa_s->current_ssid) {
+			wpa_printf(MSG_DEBUG, "SAE: current_ssid is NULL");
+			break;
+		}
+		sme_external_auth_trigger(wpa_s, data);
+#endif /* CONFIG_SAE */
 		break;
 	default:
 		wpa_msg(wpa_s, MSG_INFO, "Unknown event %d", event);

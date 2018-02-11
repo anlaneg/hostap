@@ -13,6 +13,7 @@ logger = logging.getLogger()
 
 import hwsim_utils
 import hostapd
+from wpasupplicant import WpaSupplicant
 from utils import HwsimSkip, alloc_fail, fail_test, wait_fail_trigger
 from test_ap_psk import find_wpas_process, read_process_memory, verify_not_present, get_key_locations
 
@@ -249,6 +250,38 @@ def test_sae_mixed(dev, apdev):
         dev[i].request("SET sae_groups ")
         dev[i].connect("test-sae", psk="12345678", key_mgmt="SAE",
                        scan_freq="2412")
+
+def test_sae_mixed_mfp(dev, apdev):
+    """Mixed SAE and non-SAE network and MFP required with SAE"""
+    if "SAE" not in dev[0].get_capability("auth_alg"):
+        raise HwsimSkip("SAE not supported")
+    params = hostapd.wpa2_params(ssid="test-sae", passphrase="12345678")
+    params['wpa_key_mgmt'] = 'SAE WPA-PSK'
+    params["ieee80211w"] = "1"
+    params['sae_require_mfp'] = '1'
+    hostapd.add_ap(apdev[0], params)
+
+    dev[0].request("SET sae_groups ")
+    dev[0].connect("test-sae", psk="12345678", key_mgmt="SAE", ieee80211w="2",
+                   scan_freq="2412")
+    dev[0].dump_monitor()
+
+    dev[1].request("SET sae_groups ")
+    dev[1].connect("test-sae", psk="12345678", key_mgmt="SAE", ieee80211w="0",
+                   scan_freq="2412", wait_connect=False)
+    ev = dev[1].wait_event(["CTRL-EVENT-CONNECTED",
+                            "CTRL-EVENT-ASSOC-REJECT"], timeout=10)
+    if ev is None:
+        raise Exception("No connection result reported")
+    if "CTRL-EVENT-ASSOC-REJECT" not in ev:
+        raise Exception("SAE connection without MFP was not rejected")
+    if "status_code=31" not in ev:
+        raise Exception("Unexpected status code in rejection: " + ev)
+    dev[1].request("DISCONNECT")
+    dev[1].dump_monitor()
+
+    dev[2].connect("test-sae", psk="12345678", ieee80211w="0", scan_freq="2412")
+    dev[2].dump_monitor()
 
 @remote_compatible
 def test_sae_missing_password(dev, apdev):
@@ -619,6 +652,84 @@ def test_sae_proto_ffc(dev, apdev):
         dev[0].request("REMOVE_NETWORK all")
         hapd.set("ext_mgmt_frame_handling", "0")
         hapd.dump_monitor()
+
+def test_sae_proto_confirm_replay(dev, apdev):
+    """SAE protocol testing - Confirm replay"""
+    if "SAE" not in dev[0].get_capability("auth_alg"):
+        raise HwsimSkip("SAE not supported")
+    params = hostapd.wpa2_params(ssid="test-sae",
+                                 passphrase="12345678")
+    params['wpa_key_mgmt'] = 'SAE'
+    hapd = hostapd.add_ap(apdev[0], params)
+    bssid = apdev[0]['bssid']
+
+    dev[0].request("SET sae_groups 19")
+
+    dev[0].scan_for_bss(bssid, freq=2412)
+    hapd.set("ext_mgmt_frame_handling", "1")
+    dev[0].connect("test-sae", psk="12345678", key_mgmt="SAE",
+                   scan_freq="2412", wait_connect=False)
+
+    logger.info("Commit")
+    for i in range(0, 10):
+        req = hapd.mgmt_rx()
+        if req is None:
+            raise Exception("MGMT RX wait timed out (commit)")
+        if req['subtype'] == 11:
+            break
+        req = None
+    if not req:
+        raise Exception("Authentication frame (commit) not received")
+
+    bssid = hapd.own_addr().replace(':', '')
+    addr = dev[0].own_addr().replace(':', '')
+    hdr = "b0003a01" + bssid + addr + bssid + "1000"
+
+    hapd.dump_monitor()
+    hapd.request("MGMT_RX_PROCESS freq=2412 datarate=0 ssi_signal=-30 frame=" + req['frame'].encode('hex'))
+
+    logger.info("Confirm")
+    for i in range(0, 10):
+        req = hapd.mgmt_rx()
+        if req is None:
+            raise Exception("MGMT RX wait timed out (confirm)")
+        if req['subtype'] == 11:
+            break
+        req = None
+    if not req:
+        raise Exception("Authentication frame (confirm) not received")
+
+    hapd.dump_monitor()
+    hapd.request("MGMT_RX_PROCESS freq=2412 datarate=0 ssi_signal=-30 frame=" + req['frame'].encode('hex'))
+
+    logger.info("Replay Confirm")
+    hapd.request("MGMT_RX_PROCESS freq=2412 datarate=0 ssi_signal=-30 frame=" + req['frame'].encode('hex'))
+
+    logger.info("Association Request")
+    for i in range(0, 10):
+        req = hapd.mgmt_rx()
+        if req is None:
+            raise Exception("MGMT RX wait timed out (AssocReq)")
+        if req['subtype'] == 0:
+            break
+        req = None
+    if not req:
+        raise Exception("Association Request frame not received")
+
+    hapd.dump_monitor()
+    hapd.request("MGMT_RX_PROCESS freq=2412 datarate=0 ssi_signal=-30 frame=" + req['frame'].encode('hex'))
+    ev = hapd.wait_event(["MGMT-TX-STATUS"], timeout=5)
+    if ev is None:
+        raise Exception("Management frame TX status not reported (1)")
+    if "stype=1 ok=1" not in ev:
+        raise Exception("Unexpected management frame TX status (1): " + ev)
+    cmd = "MGMT_TX_STATUS_PROCESS %s" % (" ".join(ev.split(' ')[1:4]))
+    if "OK" not in hapd.request(cmd):
+        raise Exception("MGMT_TX_STATUS_PROCESS failed")
+
+    hapd.set("ext_mgmt_frame_handling", "0")
+
+    dev[0].wait_connected()
 
 def test_sae_proto_hostapd(dev, apdev):
     """SAE protocol testing with hostapd"""
@@ -1091,3 +1202,24 @@ def test_sae_password_long(dev, apdev):
     dev[0].request("SET sae_groups ")
     dev[0].connect("test-sae", sae_password=100*"A", key_mgmt="SAE",
                    scan_freq="2412")
+
+def test_sae_connect_cmd(dev, apdev):
+    """SAE with connect command"""
+    wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
+    wpas.interface_add("wlan5", drv_params="force_connect_cmd=1")
+    if "SAE" not in wpas.get_capability("auth_alg"):
+        raise HwsimSkip("SAE not supported")
+    params = hostapd.wpa2_params(ssid="test-sae", passphrase="12345678")
+    params['wpa_key_mgmt'] = 'SAE'
+    hapd = hostapd.add_ap(apdev[0], params)
+
+    wpas.request("SET sae_groups ")
+    wpas.connect("test-sae", psk="12345678", key_mgmt="SAE",
+                 scan_freq="2412", wait_connect=False)
+    # mac80211_hwsim does not support SAE offload, so accept both a successful
+    # connection and association rejection.
+    ev = wpas.wait_event(["CTRL-EVENT-CONNECTED", "CTRL-EVENT-ASSOC-REJECT",
+                          "Association request to the driver failed"],
+                         timeout=15)
+    if ev is None:
+        raise Exception("No connection result reported")

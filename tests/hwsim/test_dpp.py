@@ -1,11 +1,13 @@
 # Test cases for Device Provisioning Protocol (DPP)
 # Copyright (c) 2017, Qualcomm Atheros, Inc.
+# Copyright (c) 2018, The Linux Foundation
 #
 # This software may be distributed under the terms of the BSD license.
 # See README for more details.
 
 import logging
 logger = logging.getLogger()
+import subprocess
 import time
 
 import hostapd
@@ -77,6 +79,96 @@ def test_dpp_qr_code_parsing(dev, apdev):
     res = dev[0].request("DPP_QR_CODE " + uri)
     if "FAIL" in res:
         raise Exception("Failed to parse self-generated QR Code URI")
+
+dpp_key_p256 ="30570201010420777fc55dc51e967c10ec051b91d860b5f1e6c934e48d5daffef98d032c64b170a00a06082a8648ce3d030107a124032200020c804188c7f85beb6e91070d2b3e5e39b90ca77b4d3c5251bc1844d6ca29dcad"
+dpp_key_p384 = "307402010104302f56fdd83b5345cacb630eb7c22fa5ad5daba37307c95191e2a75756d137003bd8b32dbcb00eb5650c1eb499ecfcaec0a00706052b81040022a13403320003615ec2141b5b77aebb6523f8a012755f9a34405a8398d2ceeeebca7f5ce868bf55056cba4c4ec62fad3ed26dd29e0f23"
+dpp_key_p521 = "308198020101044200c8010d5357204c252551aaf4e210343111e503fd1dc615b257058997c49b6b643c975226e93be8181cca3d83a7072defd161dfbdf433c19abe1f2ad51867a05761a00706052b81040023a1460344000301cdf3608b1305fe34a1f976095dcf001182b9973354efe156291a66830292f9babd8f412ad462958663e7a75d1d0610abdfc3dd95d40669f7ab3bc001668cfb3b7c"
+dpp_key_bp256 = "3058020101042057133a676fb60bf2a3e6797e19833c7b0f89dc192ab99ab5fa377ae23a157765a00b06092b2403030208010107a12403220002945d9bf7ce30c9c1ac0ff21ca62b984d5bb80ff69d2be8c9716ab39a10d2caf0"
+dpp_key_bp384 = "307802010104304902df9f3033a9b7128554c0851dc7127c3573eed150671dae74c0013e9896a9b1c22b6f7d43d8a2ebb7cd474dc55039a00b06092b240303020801010ba13403320003623cb5e68787f351faababf3425161571560add2e6f9a306fcbffb507735bf955bb46dd20ba246b0d5cadce73e5bd6a6"
+dpp_key_bp512 = "30819802010104405803494226eb7e50bf0e90633f37e7e35d33f5fa502165eeba721d927f9f846caf12e925701d18e123abaaaf4a7edb4fc4de21ce18bc10c4d12e8b3439f74e40a00b06092b240303020801010da144034200033b086ccd47486522d35dc16fbb2229642c2e9e87897d45abbf21f9fb52acb5a6272b31d1b227c3e53720769cc16b4cb181b26cd0d35fe463218aaedf3b6ec00a"
+
+def test_dpp_qr_code_curves(dev, apdev):
+    """DPP QR Code and supported curves"""
+    check_dpp_capab(dev[0])
+    tests = [ ("prime256v1", dpp_key_p256),
+              ("secp384r1", dpp_key_p384),
+              ("secp521r1", dpp_key_p521) ]
+    for curve, hex in tests:
+        id = dev[0].request("DPP_BOOTSTRAP_GEN type=qrcode key=" + hex)
+        if "FAIL" in id:
+            raise Exception("Failed to set key for " + curve)
+        info = dev[0].request("DPP_BOOTSTRAP_INFO " + id)
+        if "FAIL" in info:
+            raise Exception("Failed to get info for " + curve)
+        if "curve=" + curve not in info:
+            raise Exception("Curve mismatch for " + curve)
+
+def test_dpp_qr_code_curves_brainpool(dev, apdev):
+    """DPP QR Code and supported Brainpool curves"""
+    check_dpp_capab(dev[0], brainpool=True)
+    tests = [ ("brainpoolP256r1", dpp_key_bp256),
+              ("brainpoolP384r1", dpp_key_bp384),
+              ("brainpoolP512r1", dpp_key_bp512) ]
+    for curve, hex in tests:
+        id = dev[0].request("DPP_BOOTSTRAP_GEN type=qrcode key=" + hex)
+        if "FAIL" in id:
+            raise Exception("Failed to set key for " + curve)
+        info = dev[0].request("DPP_BOOTSTRAP_INFO " + id)
+        if "FAIL" in info:
+            raise Exception("Failed to get info for " + curve)
+        if "curve=" + curve not in info:
+            raise Exception("Curve mismatch for " + curve)
+
+def test_dpp_qr_code_curve_select(dev, apdev):
+    """DPP QR Code and curve selection"""
+    check_dpp_capab(dev[0], brainpool=True)
+    check_dpp_capab(dev[1], brainpool=True)
+
+    addr = dev[0].own_addr().replace(':', '')
+    bi = []
+    for key in [ dpp_key_p256, dpp_key_p384, dpp_key_p521,
+                 dpp_key_bp256, dpp_key_bp384, dpp_key_bp512 ]:
+        id = dev[0].request("DPP_BOOTSTRAP_GEN type=qrcode chan=81/1 mac=" + addr + " key=" + key)
+        if "FAIL" in id:
+            raise Exception("Failed to set key for " + curve)
+        info = dev[0].request("DPP_BOOTSTRAP_INFO " + id)
+        for i in info.splitlines():
+            if '=' in i:
+                name, val = i.split('=')
+                if name == "curve":
+                    curve = val
+                    break
+        uri = dev[0].request("DPP_BOOTSTRAP_GET_URI " + id)
+        bi.append((curve, uri))
+
+    for curve, uri in bi:
+        logger.info("Curve: " + curve)
+        logger.info("URI: " + uri)
+
+        if "OK" not in dev[0].request("DPP_LISTEN 2412"):
+            raise Exception("Failed to start listen operation")
+
+        res = dev[1].request("DPP_QR_CODE " + uri)
+        if "FAIL" in res:
+            raise Exception("Failed to parse QR Code URI")
+        if "OK" not in dev[1].request("DPP_AUTH_INIT peer=" + res):
+            raise Exception("Failed to initiate DPP Authentication")
+        ev = dev[0].wait_event(["DPP-AUTH-SUCCESS"], timeout=5)
+        if ev is None:
+            raise Exception("DPP authentication did not succeed (Responder)")
+        ev = dev[1].wait_event(["DPP-AUTH-SUCCESS"], timeout=5)
+        if ev is None:
+            raise Exception("DPP authentication did not succeed (Initiator)")
+        ev = dev[0].wait_event(["DPP-CONF-FAILED"], timeout=2)
+        if ev is None:
+            raise Exception("DPP configuration result not seen (Enrollee)")
+        ev = dev[1].wait_event(["DPP-CONF-SENT"], timeout=2)
+        if ev is None:
+            raise Exception("DPP configuration result not seen (Responder)")
+        dev[0].request("DPP_STOP_LISTEN")
+        dev[1].request("DPP_STOP_LISTEN")
+        dev[0].dump_monitor()
+        dev[1].dump_monitor()
 
 def test_dpp_qr_code_auth_broadcast(dev, apdev):
     """DPP QR Code and authentication exchange (broadcast)"""
@@ -1580,8 +1672,11 @@ def run_dpp_auto_connect_legacy(dev, apdev, conf='sta-psk',
                                  passphrase="secret passphrase")
     if sae_only:
             params['wpa_key_mgmt'] = 'SAE'
+            params['ieee80211w'] = '2'
     elif psk_sae:
             params['wpa_key_mgmt'] = 'WPA-PSK SAE'
+            params['ieee80211w'] = '1'
+            params['sae_require_mfp'] = '1'
 
     hapd = hostapd.add_ap(apdev[0], params)
 
@@ -1749,6 +1844,65 @@ def test_dpp_qr_code_hostapd_init(dev, apdev):
     id1 = int(res)
 
     cmd = "DPP_AUTH_INIT peer=%d role=enrollee" % id1
+    if "OK" not in hapd.request(cmd):
+        raise Exception("Failed to initiate DPP Authentication")
+    ev = dev[0].wait_event(["DPP-AUTH-SUCCESS"], timeout=5)
+    if ev is None:
+        raise Exception("DPP authentication did not succeed (Responder)")
+    ev = hapd.wait_event(["DPP-AUTH-SUCCESS"], timeout=5)
+    if ev is None:
+        raise Exception("DPP authentication did not succeed (Initiator)")
+    ev = dev[0].wait_event(["DPP-CONF-SENT"], timeout=5)
+    if ev is None:
+        raise Exception("DPP configuration not completed (Configurator)")
+    ev = hapd.wait_event(["DPP-CONF-RECEIVED"], timeout=5)
+    if ev is None:
+        raise Exception("DPP configuration not completed (Enrollee)")
+    dev[0].request("DPP_STOP_LISTEN")
+    dev[0].dump_monitor()
+
+def test_dpp_qr_code_hostapd_init_offchannel(dev, apdev):
+    """DPP QR Code and hostapd as initiator (offchannel)"""
+    run_dpp_qr_code_hostapd_init_offchannel(dev, apdev, None)
+
+def test_dpp_qr_code_hostapd_init_offchannel_neg_freq(dev, apdev):
+    """DPP QR Code and hostapd as initiator (offchannel, neg_freq)"""
+    run_dpp_qr_code_hostapd_init_offchannel(dev, apdev, "neg_freq=2437")
+
+def run_dpp_qr_code_hostapd_init_offchannel(dev, apdev, extra):
+    check_dpp_capab(dev[0])
+    hapd = hostapd.add_ap(apdev[0], { "ssid": "unconfigured",
+                                      "channel": "6" })
+    check_dpp_capab(hapd)
+
+    cmd = "DPP_CONFIGURATOR_ADD"
+    res = dev[0].request(cmd);
+    if "FAIL" in res:
+        raise Exception("Failed to add configurator")
+    conf_id = int(res)
+
+    addr = dev[0].own_addr().replace(':', '')
+    cmd = "DPP_BOOTSTRAP_GEN type=qrcode chan=81/1,81/11 mac=" + addr
+    res = dev[0].request(cmd)
+    if "FAIL" in res:
+        raise Exception("Failed to generate bootstrapping info")
+    id0 = int(res)
+    uri0 = dev[0].request("DPP_BOOTSTRAP_GET_URI %d" % id0)
+
+    dev[0].set("dpp_configurator_params",
+               " conf=ap-dpp configurator=%d" % conf_id);
+    cmd = "DPP_LISTEN 2462 role=configurator"
+    if "OK" not in dev[0].request(cmd):
+        raise Exception("Failed to start listen operation")
+
+    res = hapd.request("DPP_QR_CODE " + uri0)
+    if "FAIL" in res:
+        raise Exception("Failed to parse QR Code URI")
+    id1 = int(res)
+
+    cmd = "DPP_AUTH_INIT peer=%d role=enrollee" % id1
+    if extra:
+        cmd += " " + extra
     if "OK" not in hapd.request(cmd):
         raise Exception("Failed to initiate DPP Authentication")
     ev = dev[0].wait_event(["DPP-AUTH-SUCCESS"], timeout=5)
@@ -2048,42 +2202,109 @@ def run_dpp_pkex(dev, apdev, curve=None, init_extra="", check_config=False):
         if ev is None:
             raise Exception("DPP configuration not completed (Enrollee)")
 
+def test_dpp_pkex_5ghz(dev, apdev):
+    """DPP and PKEX on 5 GHz"""
+    try:
+        dev[0].request("SET country US")
+        dev[1].request("SET country US")
+        ev = dev[0].wait_event(["CTRL-EVENT-REGDOM-CHANGE"], timeout=1)
+        if ev is None:
+            ev = dev[0].wait_global_event(["CTRL-EVENT-REGDOM-CHANGE"],
+                                          timeout=1)
+        run_dpp_pkex_5ghz(dev, apdev)
+    finally:
+        dev[0].request("SET country 00")
+        dev[1].request("SET country 00")
+        subprocess.call(['iw', 'reg', 'set', '00'])
+
+def run_dpp_pkex_5ghz(dev, apdev):
+    check_dpp_capab(dev[0])
+    check_dpp_capab(dev[1])
+
+    cmd = "DPP_BOOTSTRAP_GEN type=pkex"
+    res = dev[0].request(cmd)
+    if "FAIL" in res:
+        raise Exception("Failed to generate bootstrapping info")
+    id0 = int(res)
+
+    cmd = "DPP_BOOTSTRAP_GEN type=pkex"
+    res = dev[1].request(cmd)
+    if "FAIL" in res:
+        raise Exception("Failed to generate bootstrapping info")
+    id1 = int(res)
+
+    cmd = "DPP_PKEX_ADD own=%d identifier=test code=secret" % (id0)
+    res = dev[0].request(cmd)
+    if "FAIL" in res:
+        raise Exception("Failed to set PKEX data (responder)")
+    cmd = "DPP_LISTEN 5745"
+    if "OK" not in dev[0].request(cmd):
+        raise Exception("Failed to start listen operation")
+
+    cmd = "DPP_PKEX_ADD own=%d identifier=test init=1 code=secret" % (id1)
+    res = dev[1].request(cmd)
+    if "FAIL" in res:
+        raise Exception("Failed to set PKEX data (initiator)")
+
+    ev = dev[1].wait_event(["DPP-AUTH-SUCCESS", "DPP-FAIL"], timeout=20)
+    if ev is None or "DPP-AUTH-SUCCESS" not in ev:
+        raise Exception("DPP authentication did not succeed (Initiator)")
+    ev = dev[0].wait_event(["DPP-AUTH-SUCCESS"], timeout=5)
+    if ev is None:
+        raise Exception("DPP authentication did not succeed (Responder)")
+
 def test_dpp_pkex_test_vector(dev, apdev):
     """DPP and PKEX (P-256) test vector"""
     check_dpp_capab(dev[0])
     check_dpp_capab(dev[1])
-    dev[0].set("dpp_pkex_own_mac_override", "cd:9b:a8:f3:e5:36")
-    dev[0].set("dpp_pkex_peer_mac_override", "0c:c5:fc:af:f3:ec")
-    dev[1].set("dpp_pkex_own_mac_override", "0c:c5:fc:af:f3:ec")
-    dev[1].set("dpp_pkex_peer_mac_override", "cd:9b:a8:f3:e5:36")
+
+    init_addr = "ac:64:91:f4:52:07"
+    resp_addr = "6e:5e:ce:6e:f3:dd"
+
     identifier = "joes_key"
     code = "thisisreallysecret"
 
+    # Initiator bootstrapping private key
+    init_priv = "5941b51acfc702cdc1c347264beb2920db88eb1a0bf03a211868b1632233c269"
+
+    # Responder bootstrapping private key
+    resp_priv = "2ae8956293f49986b6d0b8169a86805d9232babb5f6813fdfe96f19d59536c60"
+
+    # Initiator x/X keypair override
+    init_x_priv = "8365c5ed93d751bef2d92b410dc6adfd95670889183fac1bd66759ad85c3187a"
+
+    # Responder y/Y keypair override
+    resp_y_priv = "d98faa24d7dd3f592665d71a95c862bfd02c4c48acb0c515a41cbc6e929675ea"
+
+    p256_prefix = "30310201010420"
+    p256_postfix = "a00a06082a8648ce3d030107"
+
+    dev[0].set("dpp_pkex_own_mac_override", resp_addr)
+    dev[0].set("dpp_pkex_peer_mac_override", init_addr)
+    dev[1].set("dpp_pkex_own_mac_override", init_addr)
+    dev[1].set("dpp_pkex_peer_mac_override", resp_addr)
+
     # Responder bootstrapping key
-    priv = "2ae8956293f49986b6d0b8169a86805d9232babb5f6813fdfe96f19d59536c60"
-    cmd = "DPP_BOOTSTRAP_GEN type=pkex key=30310201010420" + priv + "a00a06082a8648ce3d030107"
+    cmd = "DPP_BOOTSTRAP_GEN type=pkex key=" + p256_prefix + resp_priv + p256_postfix
     res = dev[0].request(cmd)
     if "FAIL" in res:
         raise Exception("Failed to generate bootstrapping info")
     id0 = int(res)
 
     # Responder y/Y keypair override
-    priv = "cc6cf1b24f59370920df1633a818c6c777013a116a4e1e285c80ed1cc996f0f5"
     dev[0].set("dpp_pkex_ephemeral_key_override",
-               "30310201010420" + priv + "a00a06082a8648ce3d030107")
+               p256_prefix + resp_y_priv + p256_postfix)
 
     # Initiator bootstrapping key
-    priv = "5941b51acfc702cdc1c347264beb2920db88eb1a0bf03a211868b1632233c269"
-    cmd = "DPP_BOOTSTRAP_GEN type=pkex key=30310201010420" + priv + "a00a06082a8648ce3d030107"
+    cmd = "DPP_BOOTSTRAP_GEN type=pkex key=" + p256_prefix + init_priv + p256_postfix
     res = dev[1].request(cmd)
     if "FAIL" in res:
         raise Exception("Failed to generate bootstrapping info")
     id1 = int(res)
 
     # Initiator x/X keypair override
-    priv = "c18f91b88b2c8e12349b2f755c888c143bcfa8e42ce744ba24ef656cf893032f"
     dev[1].set("dpp_pkex_ephemeral_key_override",
-               "30310201010420" + priv + "a00a06082a8648ce3d030107")
+               p256_prefix + init_x_priv + p256_postfix)
 
     cmd = "DPP_PKEX_ADD own=%d identifier=%s code=%s" % (id0, identifier, code)
     res = dev[0].request(cmd)
@@ -3877,7 +4098,7 @@ def test_dpp_pkex_alloc_fail(dev, apdev):
         with alloc_fail(dev[1], count, func):
             cmd = "DPP_PKEX_ADD own=%d identifier=test init=1 conf=sta-dpp configurator=%d code=secret" % (id1, conf_id)
             dev[1].request(cmd)
-            wait_fail_trigger(dev[1], "GET_ALLOC_FAIL")
+            wait_fail_trigger(dev[1], "GET_ALLOC_FAIL", max_iter=100)
             ev = dev[0].wait_event(["GAS-QUERY-START"], timeout=0.01)
             if ev:
                 dev[0].request("DPP_STOP_LISTEN")
@@ -3931,7 +4152,7 @@ def test_dpp_pkex_alloc_fail(dev, apdev):
         with alloc_fail(dev[0], count, func):
             cmd = "DPP_PKEX_ADD own=%d identifier=test init=1 conf=sta-dpp configurator=%d code=secret" % (id1, conf_id)
             dev[1].request(cmd)
-            wait_fail_trigger(dev[0], "GET_ALLOC_FAIL")
+            wait_fail_trigger(dev[0], "GET_ALLOC_FAIL", max_iter=100)
             ev = dev[0].wait_event(["GAS-QUERY-START"], timeout=0.01)
             if ev:
                 dev[0].request("DPP_STOP_LISTEN")
@@ -4011,7 +4232,7 @@ def test_dpp_pkex_test_fail(dev, apdev):
         with fail_test(dev[1], count, func):
             cmd = "DPP_PKEX_ADD own=%d identifier=test init=1 conf=sta-dpp configurator=%d code=secret" % (id1, conf_id)
             dev[1].request(cmd)
-            wait_fail_trigger(dev[1], "GET_FAIL")
+            wait_fail_trigger(dev[1], "GET_FAIL", max_iter=100)
             ev = dev[0].wait_event(["GAS-QUERY-START"], timeout=0.01)
             if ev:
                 dev[0].request("DPP_STOP_LISTEN")

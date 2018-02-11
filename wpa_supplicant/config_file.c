@@ -397,7 +397,8 @@ struct wpa_config * wpa_config_read(const char *name, struct wpa_config *cfgp)
 	if (f == NULL) {
 		wpa_printf(MSG_ERROR, "Failed to open config file '%s', "
 			   "error: %s", name, strerror(errno));
-		os_free(config);
+		if (config != cfgp)
+			os_free(config);
 		return NULL;
 	}
 
@@ -463,7 +464,8 @@ struct wpa_config * wpa_config_read(const char *name, struct wpa_config *cfgp)
 
 #ifndef WPA_IGNORE_CONFIG_ERRORS
 	if (errors) {
-		wpa_config_free(config);
+		if (config != cfgp)
+			wpa_config_free(config);
 		config = NULL;
 		head = NULL;
 	}
@@ -760,6 +762,7 @@ static void wpa_config_write_network(FILE *f, struct wpa_ssid *ssid)
 	write_eap(f, ssid);
 	STR(identity);
 	STR(anonymous_identity);
+	STR(imsi_identity);
 	STR(password);
 	STR(ca_cert);
 	STR(ca_path);
@@ -873,6 +876,7 @@ static void wpa_config_write_network(FILE *f, struct wpa_ssid *ssid)
 	STR(dpp_csign);
 #endif /* CONFIG_DPP */
 	INT(owe_group);
+	INT(owe_only);
 #ifdef CONFIG_HT_OVERRIDES
 	INT_DEF(disable_ht, DEFAULT_DISABLE_HT);
 	INT_DEF(disable_ht40, DEFAULT_DISABLE_HT40);
