@@ -11,7 +11,7 @@
 #include "common/ieee802_11_defs.h"
 #include "common.h"
 
-
+//实现16进制字符转换
 static int hex2num(char c)
 {
 	if (c >= '0' && c <= '9')
@@ -23,7 +23,7 @@ static int hex2num(char c)
 	return -1;
 }
 
-
+//将两位16进制转换为1个字节
 int hex2byte(const char *hex)
 {
 	int a, b;
@@ -36,7 +36,7 @@ int hex2byte(const char *hex)
 	return (a << 4) | b;
 }
 
-
+//将字符串形式的mac地址转换为mac数组
 static const char * hwaddr_parse(const char *txt, u8 *addr)
 {
 	size_t i;
@@ -49,6 +49,7 @@ static const char * hwaddr_parse(const char *txt, u8 *addr)
 			return NULL;
 		txt += 2;
 		addr[i] = a;
+		//跳过':'号
 		if (i < ETH_ALEN - 1 && *txt++ != ':')
 			return NULL;
 	}
@@ -62,6 +63,7 @@ static const char * hwaddr_parse(const char *txt, u8 *addr)
  * @addr: Buffer for the MAC address (ETH_ALEN = 6 bytes)
  * Returns: 0 on success, -1 on failure (e.g., string not a MAC address)
  */
+//字符串转mac地址
 int hwaddr_aton(const char *txt, u8 *addr)
 {
 	return hwaddr_parse(txt, addr) ? 0 : -1;
@@ -627,27 +629,29 @@ void * __hide_aliasing_typecast(void *foo)
 	return foo;
 }
 
-
+//支持中文等多字节命名的	ssid
 char * wpa_config_parse_string(const char *value, size_t *len)
 {
+	//以双引号开头
 	if (*value == '"') {
 		const char *pos;
 		char *str;
 		value++;
-		pos = os_strrchr(value, '"');
+		pos = os_strrchr(value, '"');//找结尾的双引号
 		if (pos == NULL || pos[1] != '\0')
 			return NULL;
-		*len = pos - value;
+		*len = pos - value;//字符串长度
 		str = dup_binstr(value, *len);
 		if (str == NULL)
 			return NULL;
-		return str;
+		return str;//返回字符串
 	} else if (*value == 'P' && value[1] == '"') {
+		//以'P"'开头的ssid解析
 		const char *pos;
 		char *tstr, *str;
 		size_t tlen;
 		value += 2;
-		pos = os_strrchr(value, '"');
+		pos = os_strrchr(value, '"');//取最后一个双引号
 		if (pos == NULL || pos[1] != '\0')
 			return NULL;
 		tlen = pos - value;
@@ -666,6 +670,7 @@ char * wpa_config_parse_string(const char *value, size_t *len)
 
 		return str;
 	} else {
+		//按普通的字符串进行处理，进行16进制处理
 		u8 *str;
 		size_t tlen, hlen = os_strlen(value);
 		if (hlen & 1)
@@ -751,7 +756,7 @@ size_t merge_byte_arrays(u8 *res, size_t res_len,
 	return len;
 }
 
-
+//采用memcopy复制字符串src
 char * dup_binstr(const void *src, size_t len)
 {
 	char *res;
@@ -965,7 +970,7 @@ void str_clear_free(char *str)
 	}
 }
 
-
+//将bin清0后，释放掉
 void bin_clear_free(void *bin, size_t len)
 {
 	if (bin) {

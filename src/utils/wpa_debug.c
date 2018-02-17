@@ -784,12 +784,13 @@ void wpa_msg_global_only(void *ctx, int level, const char *fmt, ...)
 #ifndef CONFIG_NO_HOSTAPD_LOGGER
 static hostapd_logger_cb_func hostapd_logger_cb = NULL;
 
+//注册日志回调
 void hostapd_logger_register_cb(hostapd_logger_cb_func func)
 {
 	hostapd_logger_cb = func;
 }
 
-
+//格式化字符串，并释放掉内存
 void hostapd_logger(void *ctx, const u8 *addr, unsigned int module, int level,
 		    const char *fmt, ...)
 {
@@ -798,6 +799,7 @@ void hostapd_logger(void *ctx, const u8 *addr, unsigned int module, int level,
 	int buflen;
 	int len;
 
+	//取格式化后字符串长度
 	va_start(ap, fmt);
 	buflen = vsnprintf(NULL, 0, fmt, ap) + 1;
 	va_end(ap);
@@ -808,9 +810,12 @@ void hostapd_logger(void *ctx, const u8 *addr, unsigned int module, int level,
 			   "message buffer");
 		return;
 	}
+
+	//格式化字符串，并存入buf
 	va_start(ap, fmt);
 	len = vsnprintf(buf, buflen, fmt, ap);
 	va_end(ap);
+	//日志logger回调
 	if (hostapd_logger_cb)
 		hostapd_logger_cb(ctx, addr, module, level, buf, len);
 	else if (addr)

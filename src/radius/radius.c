@@ -22,12 +22,12 @@ struct radius_msg {
 	/**
 	 * buf - Allocated buffer for RADIUS message
 	 */
-	struct wpabuf *buf;
+	struct wpabuf *buf;//消息所用的缓冲区
 
 	/**
 	 * hdr - Pointer to the RADIUS header in buf
 	 */
-	struct radius_hdr *hdr;
+	struct radius_hdr *hdr;//指向消息头
 
 	/**
 	 * attr_pos - Array of indexes to attributes
@@ -35,17 +35,17 @@ struct radius_msg {
 	 * The values are number of bytes from buf to the beginning of
 	 * struct radius_attr_hdr.
 	 */
-	size_t *attr_pos;
+	size_t *attr_pos;//属性位置指针数组
 
 	/**
 	 * attr_size - Total size of the attribute pointer array
 	 */
-	size_t attr_size;
+	size_t attr_size;//属性指针数组的可用大小
 
 	/**
 	 * attr_used - Total number of attributes in the array
 	 */
-	size_t attr_used;
+	size_t attr_used;//属性指针数组使用大小
 };
 
 
@@ -75,7 +75,7 @@ static void radius_msg_set_hdr(struct radius_msg *msg, u8 code, u8 identifier)
 	msg->hdr->identifier = identifier;
 }
 
-
+//初始化消息的属性数组
 static int radius_msg_initialize(struct radius_msg *msg)
 {
 	msg->attr_pos = os_calloc(RADIUS_DEFAULT_ATTR_COUNT,
@@ -99,6 +99,7 @@ static int radius_msg_initialize(struct radius_msg *msg)
  * The caller is responsible for freeing the returned data with
  * radius_msg_free().
  */
+//创建一个radius消息
 struct radius_msg * radius_msg_new(u8 code, u8 identifier)
 {
 	struct radius_msg *msg;
@@ -112,8 +113,10 @@ struct radius_msg * radius_msg_new(u8 code, u8 identifier)
 		radius_msg_free(msg);
 		return NULL;
 	}
+	//使msg指向消息头
 	msg->hdr = wpabuf_put(msg->buf, sizeof(struct radius_hdr));
 
+	//填充消息头
 	radius_msg_set_hdr(msg, code, identifier);
 
 	return msg;
@@ -620,13 +623,14 @@ static int radius_msg_add_attr_to_array(struct radius_msg *msg,
 		msg->attr_size = nlen;
 	}
 
+	//指明此属性在buf中的位置（通过记录偏移量来记录）
 	msg->attr_pos[msg->attr_used++] =
 		(unsigned char *) attr - wpabuf_head_u8(msg->buf);
 
 	return 0;
 }
 
-
+//向radius消息添加属性
 struct radius_attr_hdr *radius_msg_add_attr(struct radius_msg *msg, u8 type,
 					    const u8 *data, size_t data_len)
 {
@@ -636,6 +640,7 @@ struct radius_attr_hdr *radius_msg_add_attr(struct radius_msg *msg, u8 type,
 	if (TEST_FAIL())
 		return NULL;
 
+	//属性值不得超过指定大小
 	if (data_len > RADIUS_MAX_ATTR_LEN) {
 		wpa_printf(MSG_ERROR, "radius_msg_add_attr: too long attribute (%lu bytes)",
 		       (unsigned long) data_len);
@@ -644,6 +649,7 @@ struct radius_attr_hdr *radius_msg_add_attr(struct radius_msg *msg, u8 type,
 
 	buf_needed = sizeof(*attr) + data_len;
 
+	//扩大buf,并重新指定hdr
 	if (wpabuf_tailroom(msg->buf) < buf_needed) {
 		/* allocate more space for message buffer */
 		if (wpabuf_resize(&msg->buf, buf_needed) < 0)
@@ -651,6 +657,7 @@ struct radius_attr_hdr *radius_msg_add_attr(struct radius_msg *msg, u8 type,
 		msg->hdr = wpabuf_mhead(msg->buf);
 	}
 
+	//向buf存放属性
 	attr = wpabuf_put(msg->buf, sizeof(struct radius_attr_hdr));
 	attr->type = type;
 	attr->length = sizeof(*attr) + data_len;

@@ -86,7 +86,7 @@ typedef enum hostap_security_policy {
 struct hostapd_ssid {
 	u8 ssid[SSID_MAX_LEN];//无线ssid
 	size_t ssid_len;//设置ssid长度
-	unsigned int ssid_set:1;
+	unsigned int ssid_set:1;//标记ssid被填充了
 	unsigned int utf8_ssid:1;
 	unsigned int wpa_passphrase_set:1;
 	unsigned int wpa_psk_set:1;
@@ -235,11 +235,12 @@ struct fils_realm {
  * struct hostapd_bss_config - Per-BSS configuration
  */
 struct hostapd_bss_config {
-	char iface[IFNAMSIZ + 1];
+	char iface[IFNAMSIZ + 1];//接口名称
 	char bridge[IFNAMSIZ + 1];//桥名称
 	char vlan_bridge[IFNAMSIZ + 1];
 	char wds_bridge[IFNAMSIZ + 1];
 
+	//日志级别（0时最详细的）
 	enum hostapd_logger_level logger_syslog_level, logger_stdout_level;
 
 	unsigned int logger_syslog; /* module bitfield */
@@ -682,8 +683,8 @@ struct he_operation {
  * struct hostapd_config - Per-radio interface configuration
  */
 struct hostapd_config {
-	struct hostapd_bss_config **bss, *last_bss;
-	size_t num_bss;
+	struct hostapd_bss_config **bss, *last_bss;//bss数组,last_bass总是指向最后一个bss
+	size_t num_bss;//bss数组大小
 
 	u16 beacon_int;
 	int rts_threshold;
@@ -704,7 +705,9 @@ struct hostapd_config {
 	unsigned int beacon_rate;
 	enum beacon_rate_type rate_type;
 
+	//配置文件指定驱动名，在wpa_drivers数组中查找到的驱动
 	const struct wpa_driver_ops *driver;
+	//为驱动指定的参数（配置文件给出）
 	char *driver_params;
 
 	int ap_table_max_size;

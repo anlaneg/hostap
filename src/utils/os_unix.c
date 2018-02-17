@@ -217,7 +217,7 @@ static int os_daemon(int nochdir, int noclose)
 #define os_daemon daemon
 #endif /* __APPLE__ */
 
-
+//制作daemon
 int os_daemonize(const char *pid_file)
 {
 #if defined(__uClinux__) || defined(__sun__)
@@ -247,7 +247,7 @@ void os_daemonize_terminate(const char *pid_file)
 		unlink(pid_file);
 }
 
-
+//生成一段长度为len的随机值（其值填充到buf中，自/dev/urandom中读取）
 int os_get_random(unsigned char *buf, size_t len)
 {
 	FILE *f;
@@ -397,39 +397,44 @@ int os_unsetenv(const char *name)
 #endif
 }
 
-
+//读取文件内容
 char * os_readfile(const char *name, size_t *len)
 {
 	FILE *f;
 	char *buf;
 	long pos;
 
-	f = fopen(name, "rb");
+	f = fopen(name, "rb");//打开文件
 	if (f == NULL)
 		return NULL;
 
+	//获得文件大小
 	if (fseek(f, 0, SEEK_END) < 0 || (pos = ftell(f)) < 0) {
 		fclose(f);
 		return NULL;
 	}
 	*len = pos;
+	//偏移至起始位置
 	if (fseek(f, 0, SEEK_SET) < 0) {
 		fclose(f);
 		return NULL;
 	}
 
+	//申请整个文件大小
 	buf = os_malloc(*len);
 	if (buf == NULL) {
 		fclose(f);
 		return NULL;
 	}
 
+	//读取文件
 	if (fread(buf, 1, *len, f) != *len) {
 		fclose(f);
 		os_free(buf);
 		return NULL;
 	}
 
+	//关闭文件
 	fclose(f);
 
 	return buf;

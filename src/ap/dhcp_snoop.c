@@ -45,7 +45,7 @@ static void handle_dhcp(void *ctx, const u8 *src_addr, const u8 *buf,
 	if (exten_len < 4)
 		return;
 
-	b = (const struct bootp_pkt *) &buf[ETH_HLEN];
+	b = (const struct bootp_pkt *) &buf[ETH_HLEN];//这里完全不考虑ip头部含选项的情况？
 	tot_len = ntohs(b->iph.tot_len);
 	if (tot_len > (unsigned int) (len - ETH_HLEN))
 		return;
@@ -88,9 +88,9 @@ static void handle_dhcp(void *ctx, const u8 *src_addr, const u8 *buf,
 		}
 	}
 
-	if (msgtype == DHCPACK) {
+	if (msgtype == DHCPACK) {//只处理dhcp ack报文（即服务器端向客户端同意地址使用请求的报文）
 		if (b->your_ip == 0)
-			return;
+			return;//错误的ack报文
 
 		/* DHCPACK for DHCPREQUEST */
 		sta = ap_get_sta(hapd, b->hw_addr);
@@ -110,10 +110,12 @@ static void handle_dhcp(void *ctx, const u8 *src_addr, const u8 *buf,
 			wpa_printf(MSG_DEBUG,
 				   "dhcp_snoop: Removing IPv4 address %s from the ip neigh table",
 				   ipaddr_str(be_to_host32(sta->ipaddr)));
+			//删除邻居表项
 			hostapd_drv_br_delete_ip_neigh(hapd, 4,
 						       (u8 *) &sta->ipaddr);
 		}
 
+		//添加ip领居表项（b->your_ip的mac地址是sta->addr)
 		res = hostapd_drv_br_add_ip_neigh(hapd, 4, (u8 *) &b->your_ip,
 						  prefixlen, sta->addr);
 		if (res) {

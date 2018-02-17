@@ -41,6 +41,7 @@ static void hostapd_config_free_vlan(struct hostapd_bss_config *bss)
 #define DEFAULT_WPA_DISABLE_EAPOL_KEY_RETRIES 0
 #endif /* DEFAULT_WPA_DISABLE_EAPOL_KEY_RETRIES */
 
+//为bss段提供默认值
 void hostapd_config_defaults_bss(struct hostapd_bss_config *bss)
 {
 	dl_list_init(&bss->anqp_elem);

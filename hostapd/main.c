@@ -32,8 +32,8 @@
 
 
 struct hapd_global {
-	void **drv_priv;
-	size_t drv_count;
+	void **drv_priv;//各驱动的私有数据（数组类型）
+	size_t drv_count;//驱动的数目
 };
 
 static struct hapd_global global;
@@ -191,7 +191,7 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
 		params.global_priv = global.drv_priv[i];
 		break;
 	}
-	params.bssid = b;
+	params.bssid = b;//mac地址
 	params.ifname = hapd->conf->iface;
 	params.driver_params = hapd->iconf->driver_params;
 	params.use_pae_group_addr = hapd->conf->use_pae_group_addr;
@@ -208,6 +208,7 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
 
 	params.own_addr = hapd->own_addr;
 
+	//驱动初始化
 	hapd->drv_priv = hapd->driver->hapd_init(hapd, &params);
 	os_free(params.bridge);
 	if (hapd->drv_priv == NULL) {
@@ -257,6 +258,7 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
  * or more BSSes sharing the same radio) and allocate memory for the BSS
  * interfaces. No actiual driver operations are started.
  */
+//依据配置文件创建hostapd_iface结构
 static struct hostapd_iface *
 hostapd_interface_init(struct hapd_interfaces *interfaces, const char *if_name,
 		       const char *config_fname, int debug)
@@ -265,6 +267,7 @@ hostapd_interface_init(struct hapd_interfaces *interfaces, const char *if_name,
 	int k;
 
 	wpa_printf(MSG_ERROR, "Configuration file: %s", config_fname);
+	//读取配置文件
 	iface = hostapd_init(interfaces, config_fname);
 	if (!iface)
 		return NULL;
@@ -360,21 +363,24 @@ static int hostapd_global_init(struct hapd_interfaces *interfaces,
 	random_init(entropy_file);
 
 #ifndef CONFIG_NATIVE_WINDOWS
+	//注册信号SIGHUP,SIGUSR1处理
 	eloop_register_signal(SIGHUP, handle_reload, interfaces);
 	eloop_register_signal(SIGUSR1, handle_dump_state, interfaces);
 #endif /* CONFIG_NATIVE_WINDOWS */
 	eloop_register_signal_terminate(handle_term, interfaces);
 
 #ifndef CONFIG_NATIVE_WINDOWS
-	openlog("hostapd", 0, LOG_DAEMON);
+	openlog("hostapd", 0, LOG_DAEMON);//打开日志
 #endif /* CONFIG_NATIVE_WINDOWS */
 
 	for (i = 0; wpa_drivers[i]; i++)
 		global.drv_count++;
 	if (global.drv_count == 0) {
+		//不存在驱动，退出
 		wpa_printf(MSG_ERROR, "No drivers enabled");
 		return -1;
 	}
+	//为各驱动申请私有结构
 	global.drv_priv = os_calloc(global.drv_count, sizeof(void *));
 	if (global.drv_priv == NULL)
 		return -1;
@@ -413,7 +419,7 @@ static void hostapd_global_deinit(const char *pid_file, int eloop_initialized)
 	os_daemonize_terminate(pid_file);
 }
 
-
+//制作daemon,并进行事件循环
 static int hostapd_global_run(struct hapd_interfaces *ifaces, int daemonize,
 			      const char *pid_file)
 {
@@ -436,6 +442,7 @@ static int hostapd_global_run(struct hapd_interfaces *ifaces, int daemonize,
 	}
 #endif /* EAP_SERVER_TNC */
 
+	//如果需要制作成daemon,则创建daemon
 	if (daemonize) {
 		if (os_daemonize(pid_file)) {
 			wpa_printf(MSG_ERROR, "daemon: %s", strerror(errno));
@@ -448,6 +455,7 @@ static int hostapd_global_run(struct hapd_interfaces *ifaces, int daemonize,
 		}
 	}
 
+	//进入事件循环
 	eloop_run();
 
 	return 0;
@@ -699,6 +707,7 @@ int main(int argc, char *argv[])
 				wpa_debug_level--;//通过增加-d选项，可以提高减少log的级别
 			break;
 		case 'B':
+			//处理为daemon
 			daemonize++;
 			break;
 		case 'e':
@@ -775,7 +784,7 @@ int main(int argc, char *argv[])
 
 	if (optind == argc && interfaces.global_iface_path == NULL &&
 	    num_bss_configs == 0)
-		usage();//所有参数已完成解析，但
+		usage();//所有参数已完成解析，进行合法性检查
 
 	wpa_msg_register_ifname_cb(hostapd_msg_ifname_cb);
 
@@ -831,6 +840,7 @@ int main(int argc, char *argv[])
 	for (i = 0; i < interfaces.count; i++) {
 		char *if_name = NULL;
 
+		//如果通过-i选项，指出了if_name,则采用if_names规定的名称
 		if (i < if_names_size)
 			if_name = if_names[i];
 
@@ -894,6 +904,7 @@ int main(int argc, char *argv[])
 	 */
 	interfaces.terminate_on_error = interfaces.count;
 	for (i = 0; i < interfaces.count; i++) {
+		//初始化每个接口的驱动
 		if (hostapd_driver_init(interfaces.iface[i]))
 			goto out;
 #ifdef CONFIG_MBO
@@ -920,6 +931,7 @@ int main(int argc, char *argv[])
 
 	hostapd_global_ctrl_iface_init(&interfaces);
 
+	//此函数将进入事件循环，故此函数结束，则说明进行需要退出了
 	if (hostapd_global_run(&interfaces, daemonize, pid_file)) {
 		wpa_printf(MSG_ERROR, "Failed to start eloop");
 		goto out;

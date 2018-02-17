@@ -304,6 +304,7 @@ static inline int hostapd_drv_br_add_ip_neigh(struct hostapd_data *hapd,
 	if (hapd->driver == NULL || hapd->drv_priv == NULL ||
 	    hapd->driver->br_add_ip_neigh == NULL)
 		return -1;
+	//添加ip邻居表项
 	return hapd->driver->br_add_ip_neigh(hapd->drv_priv, version, ipaddr,
 					     prefixlen, addr);
 }
@@ -314,6 +315,7 @@ static inline int hostapd_drv_br_delete_ip_neigh(struct hostapd_data *hapd,
 	if (hapd->driver == NULL || hapd->drv_priv == NULL ||
 	    hapd->driver->br_delete_ip_neigh == NULL)
 		return -1;
+	//删除领居表项
 	return hapd->driver->br_delete_ip_neigh(hapd->drv_priv, version,
 						ipaddr);
 }

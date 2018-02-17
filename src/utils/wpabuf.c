@@ -213,12 +213,13 @@ void wpabuf_clear_free(struct wpabuf *buf)
 	}
 }
 
-
+//在buf中空出len长度
 void * wpabuf_put(struct wpabuf *buf, size_t len)
 {
 	void *tmp = wpabuf_mhead_u8(buf) + wpabuf_len(buf);
 	buf->used += len;
 	if (buf->used > buf->size) {
+		//使用空间超出buf实际尺寸，报错
 		wpabuf_overflow(buf, len);
 	}
 	return tmp;

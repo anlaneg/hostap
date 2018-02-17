@@ -195,22 +195,22 @@ struct radius_client_data {
 	/**
 	 * auth_handlers - Authentication message handlers
 	 */
-	struct radius_rx_handler *auth_handlers;
+	struct radius_rx_handler *auth_handlers;//auth类型的handler
 
 	/**
 	 * num_auth_handlers - Number of handlers in auth_handlers
 	 */
-	size_t num_auth_handlers;
+	size_t num_auth_handlers;//auth类型的handler数目
 
 	/**
 	 * acct_handlers - Accounting message handlers
 	 */
-	struct radius_rx_handler *acct_handlers;
+	struct radius_rx_handler *acct_handlers;//acc 类型handler
 
 	/**
 	 * num_acct_handlers - Number of handlers in acct_handlers
 	 */
-	size_t num_acct_handlers;
+	size_t num_acct_handlers;//acc handler数目
 
 	/**
 	 * msgs - Pending outgoing RADIUS messages
@@ -285,6 +285,7 @@ int radius_client_register(struct radius_client_data *radius,
 	struct radius_rx_handler **handlers, *newh;
 	size_t *num;
 
+	//依据消息类型，选择不同的handlers
 	if (msg_type == RADIUS_ACCT) {
 		handlers = &radius->acct_handlers;
 		num = &radius->num_acct_handlers;
@@ -293,15 +294,17 @@ int radius_client_register(struct radius_client_data *radius,
 		num = &radius->num_auth_handlers;
 	}
 
+	//增加handlers的空间
 	newh = os_realloc_array(*handlers, *num + 1,
 				sizeof(struct radius_rx_handler));
 	if (newh == NULL)
 		return -1;
 
+	//注册handler及其data到newh中
 	newh[*num].handler = handler;
 	newh[*num].data = data;
 	(*num)++;
-	*handlers = newh;
+	*handlers = newh;//更新handlers
 
 	return 0;
 }
@@ -775,6 +778,7 @@ int radius_client_send(struct radius_client_data *radius,
 	if (conf->msg_dumps)
 		radius_msg_dump(msg);
 
+	//发送消息
 	buf = radius_msg_get_buf(msg);
 	res = send(s, wpabuf_head(buf), wpabuf_len(buf), 0);
 	if (res < 0)
@@ -1317,6 +1321,7 @@ static int radius_client_init_auth(struct radius_client_data *radius)
 
 	radius_close_auth_sockets(radius);
 
+	//创建udp socket
 	radius->auth_serv_sock = socket(PF_INET, SOCK_DGRAM, 0);
 	if (radius->auth_serv_sock < 0)
 		wpa_printf(MSG_INFO, "RADIUS: socket[PF_INET,SOCK_DGRAM]: %s",
