@@ -1067,7 +1067,7 @@ int eloop_register_signal_reconfig(eloop_signal_handler handler,
 #endif /* CONFIG_NATIVE_WINDOWS */
 }
 
-
+//进入事件循环
 void eloop_run(void)
 {
 #ifdef CONFIG_ELOOP_POLL

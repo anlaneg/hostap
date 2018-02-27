@@ -53,7 +53,9 @@ static int random_fd = -1;
 #endif /* __linux__ */
 static unsigned int own_pool_ready = 0;
 #define RANDOM_ENTROPY_SIZE 20
+//random_entropy文件路径
 static char *random_entropy_file = NULL;
+//标明random_entropy文件已被读取
 static int random_entropy_file_read = 0;
 
 #define MIN_COLLECT_ENTROPY 1000

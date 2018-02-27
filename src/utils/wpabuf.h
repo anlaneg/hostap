@@ -18,11 +18,13 @@
  * from this file to access data.
  */
 struct wpabuf {
+	//buf,例如大小，总大小，
 	size_t size; /* total size of the allocated buffer */
 	size_t used; /* length of data in the buffer */
 	u8 *buf; /* pointer to the head of the buffer */
 	unsigned int flags;
 	/* optionally followed by the allocated buffer */
+	//后面跟数据
 };
 
 
@@ -90,11 +92,13 @@ static inline const u8 * wpabuf_head_u8(const struct wpabuf *buf)
  * @buf: wpabuf buffer
  * Returns: Pointer to the head of the buffer data
  */
+//取buffer的缓冲区头部
 static inline void * wpabuf_mhead(struct wpabuf *buf)
 {
 	return buf->buf;
 }
 
+//将头部强转为其需要的类型
 static inline u8 * wpabuf_mhead_u8(struct wpabuf *buf)
 {
 	return (u8 *) wpabuf_mhead(buf);

@@ -2198,7 +2198,7 @@ void hostapd_interface_free(struct hostapd_iface *iface)
 	hostapd_cleanup_iface(iface);
 }
 
-
+//申请hostapd_iface结构
 struct hostapd_iface * hostapd_alloc_iface(void)
 {
 	struct hostapd_iface *hapd_iface;

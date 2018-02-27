@@ -16,7 +16,7 @@
 struct radius_ctx {
 	struct radius_client_data *radius;
 	struct hostapd_radius_servers conf;
-	u8 radius_identifier;
+	u8 radius_identifier;//消息序号
 	struct in_addr own_ip_addr;
 };
 
@@ -29,6 +29,7 @@ static void hostapd_logger_cb(void *ctx, const u8 *addr, unsigned int module,
 
 
 /* Process the RADIUS frames from Authentication Server */
+//收到radius的消息后退出事件循环
 static RadiusRxResult receive_auth(struct radius_msg *msg,
 				   struct radius_msg *req,
 				   const u8 *shared_secret,
@@ -45,7 +46,7 @@ static RadiusRxResult receive_auth(struct radius_msg *msg,
 	return RADIUS_RX_PROCESSED;
 }
 
-
+//radius演示例子
 static void start_example(void *eloop_ctx, void *timeout_ctx)
 {
 	struct radius_ctx *ctx = eloop_ctx;
@@ -54,6 +55,7 @@ static void start_example(void *eloop_ctx, void *timeout_ctx)
 	printf("Sending a RADIUS authentication message\n");
 
 	ctx->radius_identifier = radius_client_get_id(ctx->radius);
+	//创建请求访问消息
 	msg = radius_msg_new(RADIUS_CODE_ACCESS_REQUEST,
 			     ctx->radius_identifier);
 	if (msg == NULL) {
@@ -61,8 +63,10 @@ static void start_example(void *eloop_ctx, void *timeout_ctx)
 		return;
 	}
 
+	//填充一个随机的授权信息
 	radius_msg_make_authenticator(msg);
 
+	//向消息体中添加属性（‘user')
 	if (!radius_msg_add_attr(msg, RADIUS_ATTR_USER_NAME,
 				 (u8 *) "user", 4)) {
 		printf("Could not add User-Name\n");
@@ -70,6 +74,7 @@ static void start_example(void *eloop_ctx, void *timeout_ctx)
 		return;
 	}
 
+	//添加密码（‘password')属性
 	if (!radius_msg_add_attr_user_password(
 		    msg, (u8 *) "password", 8,
 		    ctx->conf.auth_server->shared_secret,
@@ -79,6 +84,7 @@ static void start_example(void *eloop_ctx, void *timeout_ctx)
 		return;
 	}
 
+	//添加自已的ip地址
 	if (!radius_msg_add_attr(msg, RADIUS_ATTR_NAS_IP_ADDRESS,
 				 (u8 *) &ctx->own_ip_addr, 4)) {
 		printf("Could not add NAS-IP-Address\n");
@@ -86,6 +92,7 @@ static void start_example(void *eloop_ctx, void *timeout_ctx)
 		return;
 	}
 
+	//发送消息
 	if (radius_client_send(ctx->radius, msg, RADIUS_AUTH, NULL) < 0)
 		radius_msg_free(msg);
 }
@@ -99,8 +106,10 @@ int main(int argc, char *argv[])
 	if (os_program_init())
 		return -1;
 
+	//注册日志回调
 	hostapd_logger_register_cb(hostapd_logger_cb);
 
+	//配置radius服务器信息
 	os_memset(&ctx, 0, sizeof(ctx));
 	inet_aton("127.0.0.1", &ctx.own_ip_addr);
 
@@ -132,12 +141,14 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	//注册auth类型的消息处理句柄
 	if (radius_client_register(ctx.radius, RADIUS_AUTH, receive_auth,
 				   &ctx) < 0) {
 		printf("Failed to register RADIUS authentication handler\n");
 		return -1;
 	}
 
+	//注册定时器
 	eloop_register_timeout(0, 0, start_example, &ctx, NULL);
 
 	eloop_run();

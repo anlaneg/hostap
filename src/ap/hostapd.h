@@ -29,6 +29,7 @@ struct mesh_conf;
 
 struct hostapd_iface;
 
+//hapd对外的接口函数
 struct hapd_interfaces {
 	int (*reload_config)(struct hostapd_iface *iface);
 	//负责读取配置文件

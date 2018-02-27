@@ -16,8 +16,8 @@
 #endif /* _MSC_VER */
 
 struct radius_hdr {
-	u8 code;
-	u8 identifier;
+	u8 code;//消息类型
+	u8 identifier;//消息id
 	be16 length; /* including this header */
 	u8 authenticator[16];
 	/* followed by length-20 octets of attributes */

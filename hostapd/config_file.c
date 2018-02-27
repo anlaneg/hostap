@@ -884,7 +884,7 @@ static int hostapd_parse_intlist(int **int_list, char *val)
 	return 0;
 }
 
-
+//实现bss配置
 static int hostapd_config_bss(struct hostapd_config *conf, const char *ifname)
 {
 	struct hostapd_bss_config **all, *bss;
@@ -892,6 +892,7 @@ static int hostapd_config_bss(struct hostapd_config *conf, const char *ifname)
 	if (*ifname == '\0')
 		return -1;
 
+	//增加bss数组大小
 	all = os_realloc_array(conf->bss, conf->num_bss + 1,
 			       sizeof(struct hostapd_bss_config *));
 	if (all == NULL) {
@@ -901,6 +902,7 @@ static int hostapd_config_bss(struct hostapd_config *conf, const char *ifname)
 	}
 	conf->bss = all;
 
+	//申请bss所需内存，并设置
 	bss = os_zalloc(sizeof(*bss));
 	if (bss == NULL)
 		return -1;
@@ -912,11 +914,14 @@ static int hostapd_config_bss(struct hostapd_config *conf, const char *ifname)
 		return -1;
 	}
 
+	//使num_bss数目加1
 	conf->bss[conf->num_bss++] = bss;
 	conf->last_bss = bss;
 
 	hostapd_config_defaults_bss(bss);
+	//设置bss接口名称
 	os_strlcpy(bss->iface, ifname, sizeof(bss->iface));
+	//设置vlan接口名称
 	os_memcpy(bss->ssid.vlan, bss->iface, IFNAMSIZ + 1);
 
 	return 0;
@@ -2106,6 +2111,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 			       const char *buf, char *pos, int line)
 {
 	if (os_strcmp(buf, "interface") == 0) {
+		//由于是同一个interface，故总是设置首个bss
 		os_strlcpy(conf->bss[0]->iface, pos,
 			   sizeof(conf->bss[0]->iface));
 	} else if (os_strcmp(buf, "bridge") == 0) {
@@ -2137,6 +2143,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		os_free(conf->driver_params);
 		conf->driver_params = os_strdup(pos);
 	} else if (os_strcmp(buf, "debug") == 0) {
+		//配置文件中的debug选项将被忽略
 		wpa_printf(MSG_DEBUG, "Line %d: DEPRECATED: 'debug' configuration variable is not used anymore",
 			   line);
 	} else if (os_strcmp(buf, "logger_syslog_level") == 0) {
@@ -2161,6 +2168,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		os_memcpy(bss->ssid.ssid, pos, bss->ssid.ssid_len);
 		bss->ssid.ssid_set = 1;
 	} else if (os_strcmp(buf, "ssid2") == 0) {
+		//ssid2支持多国语言（其仍填写到ssid中）
 		size_t slen;
 		char *str = wpa_config_parse_string(pos, &slen);
 		if (str == NULL || slen < 1 || slen > SSID_MAX_LEN) {
@@ -2194,6 +2202,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 			return 1;
 		}
 	} else if (os_strcmp(buf, "deny_mac_file") == 0) {
+		//读取deny的mac地址文件
 		if (hostapd_config_read_maclist(pos, &bss->deny_mac,
 						&bss->num_deny_mac)) {
 			wpa_printf(MSG_ERROR, "Line %d: Failed to read deny_mac_file '%s'",
@@ -3040,12 +3049,14 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 			return 1;
 		}
 	} else if (os_strcmp(buf, "bss") == 0) {
+		//遇到bss关键字，新创建新的bss
 		if (hostapd_config_bss(conf, pos)) {
 			wpa_printf(MSG_ERROR, "Line %d: invalid bss item",
 				   line);
 			return 1;
 		}
 	} else if (os_strcmp(buf, "bssid") == 0) {
+		//配置bss的mac地址
 		if (hwaddr_aton(pos, bss->bssid)) {
 			wpa_printf(MSG_ERROR, "Line %d: invalid bssid item",
 				   line);
@@ -3917,7 +3928,7 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 		if (buf[0] == '#')
 			continue;//跳过注释行
 		pos = buf;
-		//将本行的'\n'改为'\0'
+		//将本行的'\n'改为'\0'，忽略'\n'后面的内容
 		while (*pos != '\0') {
 			if (*pos == '\n') {
 				*pos = '\0';
