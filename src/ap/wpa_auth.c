@@ -881,7 +881,8 @@ static int wpa_try_alt_snonce(struct wpa_state_machine *sm, u8 *data,
 			break;
 		}
 
-		if (!wpa_key_mgmt_wpa_psk(sm->wpa_key_mgmt))
+		if (!wpa_key_mgmt_wpa_psk(sm->wpa_key_mgmt) ||
+		    wpa_key_mgmt_sae(sm->wpa_key_mgmt))
 			break;
 	}
 
@@ -1491,7 +1492,7 @@ void __wpa_send_eapol(struct wpa_authenticator *wpa_auth,
 		os_memcpy(key_data, kde, kde_len);
 		WPA_PUT_BE16(key_mic + mic_len, kde_len);
 #ifdef CONFIG_FILS
-	} else if (!mic_len) {
+	} else if (!mic_len && kde) {
 		const u8 *aad[1];
 		size_t aad_len[1];
 
@@ -2680,7 +2681,8 @@ SM_STATE(WPA_PTK, PTKCALCNEGOTIATING)
 		}
 #endif /* CONFIG_FILS */
 
-		if (!wpa_key_mgmt_wpa_psk(sm->wpa_key_mgmt))
+		if (!wpa_key_mgmt_wpa_psk(sm->wpa_key_mgmt) ||
+		    wpa_key_mgmt_sae(sm->wpa_key_mgmt))
 			break;
 	}
 

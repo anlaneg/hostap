@@ -4869,11 +4869,33 @@ enum qca_wlan_vendor_attr_nd_offload {
 };
 
 /**
- * enum packet_filter_sub_cmd - Packet filter sub command
+ * enum packet_filter_sub_cmd - Packet filter sub commands
  */
 enum packet_filter_sub_cmd {
+	/**
+	 * Write packet filter program and/or data. The driver/firmware should
+	 * disable APF before writing into local buffer and re-enable APF after
+	 * writing is done.
+	 */
 	QCA_WLAN_SET_PACKET_FILTER = 1,
+	/* Get packet filter feature capabilities from driver */
 	QCA_WLAN_GET_PACKET_FILTER = 2,
+	/**
+	 * Write packet filter program and/or data. User space will send the
+	 * %QCA_WLAN_DISABLE_PACKET_FILTER command before issuing this command
+	 * and will send the %QCA_WLAN_ENABLE_PACKET_FILTER afterwards. The key
+	 * difference from that %QCA_WLAN_SET_PACKET_FILTER is the control over
+	 * enable/disable is given to user space with this command. Also,
+	 * user space sends the length of program portion in the buffer within
+	 * %QCA_WLAN_VENDOR_ATTR_PACKET_FILTER_PROG_LENGTH.
+	 */
+	QCA_WLAN_WRITE_PACKET_FILTER = 3,
+	/* Read packet filter program and/or data */
+	QCA_WLAN_READ_PACKET_FILTER = 4,
+	/* Enable APF feature */
+	QCA_WLAN_ENABLE_PACKET_FILTER = 5,
+	/* Disable APF feature */
+	QCA_WLAN_DISABLE_PACKET_FILTER = 6,
 };
 
 /**
@@ -4888,12 +4910,20 @@ enum qca_wlan_vendor_attr_packet_filter {
 	QCA_WLAN_VENDOR_ATTR_PACKET_FILTER_VERSION,
 	/* Unsigned 32-bit value indicating the packet filter id */
 	QCA_WLAN_VENDOR_ATTR_PACKET_FILTER_ID,
-	/* Unsigned 32-bit value indicating the packet filter size */
+	/**
+	 * Unsigned 32-bit value indicating the packet filter size including
+	 * program + data.
+	 */
 	QCA_WLAN_VENDOR_ATTR_PACKET_FILTER_SIZE,
 	/* Unsigned 32-bit value indicating the packet filter current offset */
 	QCA_WLAN_VENDOR_ATTR_PACKET_FILTER_CURRENT_OFFSET,
-	/* Unsigned 32-bit value indicating length of BPF instructions */
+	/* Program and/or data in bytes */
 	QCA_WLAN_VENDOR_ATTR_PACKET_FILTER_PROGRAM,
+	/* Unsigned 32-bit value of the length of the program section in packet
+	 * filter buffer.
+	 */
+	QCA_WLAN_VENDOR_ATTR_PACKET_FILTER_PROG_LENGTH = 7,
+
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_PACKET_FILTER_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_PACKET_FILTER_MAX =
@@ -5179,6 +5209,38 @@ enum he_mcs_config {
 	HE_80P80_MCS0_11 = 10,
 };
 
+/**
+ * enum qca_wlan_ba_session_config - BA session configuration
+ *
+ * Indicates the configuration values for BA session configuration attribute.
+ *
+ * @QCA_WLAN_ADD_BA: Establish a new BA session with given configuration.
+ * @QCA_WLAN_DELETE_BA: Delete the existing BA session for given TID.
+ */
+enum qca_wlan_ba_session_config {
+	QCA_WLAN_ADD_BA = 1,
+	QCA_WLAN_DELETE_BA = 2,
+};
+
+/**
+ * enum qca_wlan_ac_type - Access category type
+ *
+ * Indicates the access category type value.
+ *
+ * @QCA_WLAN_AC_BE: BE access category
+ * @QCA_WLAN_AC_BK: BK access category
+ * @QCA_WLAN_AC_VI: VI access category
+ * @QCA_WLAN_AC_VO: VO access category
+ * @QCA_WLAN_AC_ALL: All ACs
+ */
+enum qca_wlan_ac_type {
+	QCA_WLAN_AC_BE = 0,
+	QCA_WLAN_AC_BK = 1,
+	QCA_WLAN_AC_VI = 2,
+	QCA_WLAN_AC_VO = 3,
+	QCA_WLAN_AC_ALL = 4,
+};
+
 /* Attributes for data used by
  * QCA_NL80211_VENDOR_SUBCMD_WIFI_TEST_CONFIGURATION
  */
@@ -5219,6 +5281,52 @@ enum qca_wlan_vendor_attr_wifi_test_config {
 	 * for testing purposes.
 	 */
 	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_HE_MCS = 5,
+
+	/* 8-bit unsigned value to configure the driver to allow or not to
+	 * allow the connection with WEP/TKIP in HT/VHT/HE modes.
+	 * This attribute is used to configure the testbed device.
+	 * 1-allow WEP/TKIP in HT/VHT/HE, 0-do not allow WEP/TKIP.
+	 */
+	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_WEP_TKIP_IN_HE = 6,
+
+	/* 8-bit unsigned value to configure the driver to add a
+	 * new BA session or delete the existing BA session for
+	 * given TID. ADDBA command uses the buffer size and TID
+	 * configuration if user specifies the values else default
+	 * value for buffer size is used for all TIDs if the TID
+	 * also not specified. For DEL_BA command TID value is
+	 * required to process the command.
+	 * Uses enum qca_wlan_ba_session_config values.
+	 * This attribute is used to configure the testbed device.
+	 */
+	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_ADD_DEL_BA_SESSION = 7,
+
+	/* 8-bit unsigned value to configure the buffer size in addba
+	 * request and response frames.
+	 * This attribute is used to configure the testbed device.
+	 * The range of the value is 0 to 255.
+	 */
+	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_ADDBA_BUFF_SIZE = 8,
+
+	/* 8-bit unsigned value to configure the buffer size in addba
+	 * request and response frames.
+	 * This attribute is used to configure the testbed device.
+	 */
+	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_BA_TID = 9,
+
+	/* 8-bit unsigned value to configure the no ack policy.
+	 * To configure no ack policy, access category value is
+	 * required to process the command.
+	 * This attribute is used to configure the testbed device.
+	 * 1 - enable no ack, 0 - disable no ack.
+	 */
+	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_ENABLE_NO_ACK = 10,
+
+	/* 8-bit unsigned value to configure the AC for no ack policy
+	 * This attribute is used to configure the testbed device.
+	 * Uses the enum qca_wlan_ac_type values.
+	 */
+	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_NO_ACK_AC = 11,
 
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_AFTER_LAST,

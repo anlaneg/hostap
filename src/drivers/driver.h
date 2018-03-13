@@ -1563,6 +1563,8 @@ struct wpa_driver_capa {
  * functionality but can support only OCE STA-CFON functionality.
  */
 #define WPA_DRIVER_FLAGS_OCE_STA_CFON		0x0020000000000000ULL
+/** Driver supports MFP-optional in the connect command */
+#define WPA_DRIVER_FLAGS_MFP_OPTIONAL		0x0040000000000000ULL
 	u64 flags;
 
 #define FULL_AP_CLIENT_STATE_SUPP(drv_flags) \
@@ -4557,6 +4559,15 @@ enum wpa_event_type {
 	 * happen.
 	 */
 	EVENT_EXTERNAL_AUTH,
+
+	/**
+	 * EVENT_PORT_AUTHORIZED - Notification that a connection is authorized
+	 *
+	 * This event should be indicated when the driver completes the 4-way
+	 * handshake. This event should be preceded by an EVENT_ASSOC that
+	 * indicates the completion of IEEE 802.11 association.
+	 */
+	EVENT_PORT_AUTHORIZED,
 };
 
 

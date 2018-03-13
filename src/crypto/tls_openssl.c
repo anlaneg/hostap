@@ -2464,6 +2464,10 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags,
 		SSL_clear_options(ssl, SSL_OP_NO_TLSv1_2);
 #endif /* SSL_OP_NO_TLSv1_2 */
 #ifdef CONFIG_SUITEB
+#ifdef OPENSSL_IS_BORINGSSL
+	/* Start with defaults from BoringSSL */
+	SSL_CTX_set_verify_algorithm_prefs(conn->ssl_ctx, NULL, 0);
+#endif /* OPENSSL_IS_BORINGSSL */
 #if OPENSSL_VERSION_NUMBER >= 0x10002000L
 	if (flags & TLS_CONN_SUITEB_NO_ECDH) {
 		const char *ciphers = "DHE-RSA-AES256-GCM-SHA384";
@@ -2483,6 +2487,7 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags,
 		EC_KEY *ecdh;
 		const char *ciphers =
 			"ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384";
+		int nid[1] = { NID_secp384r1 };
 
 		if (openssl_ciphers) {
 			wpa_printf(MSG_DEBUG,
@@ -2496,7 +2501,7 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags,
 			return -1;
 		}
 
-		if (SSL_set1_curves_list(ssl, "P-384") != 1) {
+		if (SSL_set1_curves(ssl, nid, 1) != 1) {
 			wpa_printf(MSG_INFO,
 				   "OpenSSL: Failed to set Suite B curves");
 			return -1;
@@ -2512,7 +2517,16 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags,
 		EC_KEY_free(ecdh);
 	}
 	if (flags & (TLS_CONN_SUITEB | TLS_CONN_SUITEB_NO_ECDH)) {
-#ifndef OPENSSL_IS_BORINGSSL
+#ifdef OPENSSL_IS_BORINGSSL
+		uint16_t sigalgs[1] = { SSL_SIGN_RSA_PKCS1_SHA384 };
+
+		if (SSL_CTX_set_verify_algorithm_prefs(conn->ssl_ctx, sigalgs,
+						       1) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to set Suite B sigalgs");
+			return -1;
+		}
+#else /* OPENSSL_IS_BORINGSSL */
 		/* ECDSA+SHA384 if need to add EC support here */
 		if (SSL_set1_sigalgs_list(ssl, "RSA+SHA384") != 1) {
 			wpa_printf(MSG_INFO,
@@ -2532,6 +2546,26 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags,
 		return -1;
 	}
 #endif /* OPENSSL_VERSION_NUMBER */
+
+#ifdef OPENSSL_IS_BORINGSSL
+	if (openssl_ciphers && os_strcmp(openssl_ciphers, "SUITEB192") == 0) {
+		uint16_t sigalgs[1] = { SSL_SIGN_ECDSA_SECP384R1_SHA384 };
+		int nid[1] = { NID_secp384r1 };
+
+		if (SSL_set1_curves(ssl, nid, 1) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to set Suite B curves");
+			return -1;
+		}
+
+		if (SSL_CTX_set_verify_algorithm_prefs(conn->ssl_ctx, sigalgs,
+						       1) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to set Suite B sigalgs");
+			return -1;
+		}
+	}
+#endif /* OPENSSL_IS_BORINGSSL */
 #endif /* CONFIG_SUITEB */
 
 	return 0;
@@ -4257,6 +4291,7 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 	const char *cert_id = params->cert_id;
 	const char *ca_cert_id = params->ca_cert_id;
 	const char *engine_id = params->engine ? params->engine_id : NULL;
+	const char *ciphers;
 
 	if (conn == NULL)
 		return -1;
@@ -4307,6 +4342,15 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 					"Failed to set TLSv1_method() for EAP-FAST");
 			return -1;
 		}
+	}
+#endif
+#if OPENSSL_VERSION_NUMBER >= 0x10101000L
+	if (params->flags & TLS_CONN_EAP_FAST) {
+		/* Need to disable TLS v1.3 at least for now since OpenSSL 1.1.1
+		 * refuses to start the handshake with the modified ciphersuite
+		 * list (no TLS v1.3 ciphersuites included) for EAP-FAST. */
+		wpa_printf(MSG_DEBUG, "OpenSSL: Disable TLSv1.3 for EAP-FAST");
+		SSL_set_options(conn->ssl, SSL_OP_NO_TLSv1_3);
 	}
 #endif
 #endif /* EAP_FAST || EAP_FAST_DYNAMIC || EAP_SERVER_FAST */
@@ -4367,11 +4411,21 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 		return -1;
 	}
 
-	if (params->openssl_ciphers &&
-	    SSL_set_cipher_list(conn->ssl, params->openssl_ciphers) != 1) {
+	ciphers = params->openssl_ciphers;
+#ifdef CONFIG_SUITEB
+#ifdef OPENSSL_IS_BORINGSSL
+	if (ciphers && os_strcmp(ciphers, "SUITEB192") == 0) {
+		/* BoringSSL removed support for SUITEB192, so need to handle
+		 * this with hardcoded ciphersuite and additional checks for
+		 * other parameters. */
+		ciphers = "ECDHE-ECDSA-AES256-GCM-SHA384";
+	}
+#endif /* OPENSSL_IS_BORINGSSL */
+#endif /* CONFIG_SUITEB */
+	if (ciphers && SSL_set_cipher_list(conn->ssl, ciphers) != 1) {
 		wpa_printf(MSG_INFO,
 			   "OpenSSL: Failed to set cipher string '%s'",
-			   params->openssl_ciphers);
+			   ciphers);
 		return -1;
 	}
 
