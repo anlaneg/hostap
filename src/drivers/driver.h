@@ -1694,6 +1694,7 @@ struct hostapd_data;
 #define STA_DRV_DATA_RX_VHT_NSS BIT(5)
 #define STA_DRV_DATA_TX_SHORT_GI BIT(6)
 #define STA_DRV_DATA_RX_SHORT_GI BIT(7)
+#define STA_DRV_DATA_LAST_ACK_RSSI BIT(8)
 
 struct hostap_sta_driver_data {
 	unsigned long rx_packets, tx_packets;
@@ -1706,8 +1707,7 @@ struct hostap_sta_driver_data {
 	unsigned long num_ps_buf_frames;
 	unsigned long tx_retry_failed;
 	unsigned long tx_retry_count;
-	int last_rssi;
-	int last_ack_rssi;
+	s8 last_ack_rssi;
 	s8 signal;
 	u8 rx_vhtmcs;
 	u8 tx_vhtmcs;
@@ -1875,6 +1875,17 @@ enum wnm_oper {
 	WNM_SLEEP_TFS_RESP_IE_SET,  /* AP requests driver to set TFS resp IE
 				     * for a STA */
 	WNM_SLEEP_TFS_IE_DEL        /* AP delete the TFS IE */
+};
+
+/* enum smps_mode - SMPS mode definitions */
+enum smps_mode {
+	SMPS_AUTOMATIC,
+	SMPS_OFF,
+	SMPS_DYNAMIC,
+	SMPS_STATIC,
+
+	/* Keep last */
+	SMPS_INVALID,
 };
 
 /* enum chan_width - Channel width definitions */
@@ -4568,6 +4579,21 @@ enum wpa_event_type {
 	 * indicates the completion of IEEE 802.11 association.
 	 */
 	EVENT_PORT_AUTHORIZED,
+
+	/**
+	 * EVENT_STATION_OPMODE_CHANGED - Notify STA's HT/VHT operation mode
+	 * change event.
+	 */
+	EVENT_STATION_OPMODE_CHANGED,
+
+	/**
+	 * EVENT_INTERFACE_MAC_CHANGED - Notify that interface MAC changed
+	 *
+	 * This event is emitted when the MAC changes while the interface is
+	 * enabled. When an interface was disabled and becomes enabled, it
+	 * must be always assumed that the MAC possibly changed.
+	 */
+	EVENT_INTERFACE_MAC_CHANGED,
 };
 
 
@@ -5373,6 +5399,22 @@ union wpa_event_data {
 
 	/* For EVENT_EXTERNAL_AUTH */
 	struct external_auth external_auth;
+
+	/**
+	 * struct sta_opmode - Station's operation mode change event
+	 * @addr: The station MAC address
+	 * @smps_mode: SMPS mode of the station
+	 * @chan_width: Channel width of the station
+	 * @rx_nss: RX_NSS of the station
+	 *
+	 * This is used as data with EVENT_STATION_OPMODE_CHANGED.
+	 */
+	struct sta_opmode {
+		const u8 *addr;
+		enum smps_mode smps_mode;
+		enum chan_width chan_width;
+		u8 rx_nss;
+	} sta_opmode;
 };
 
 /**

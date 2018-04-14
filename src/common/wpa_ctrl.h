@@ -62,6 +62,7 @@ extern "C" {
 /** EAP authentication failed due to no response received */
 #define WPA_EVENT_EAP_TIMEOUT_FAILURE "CTRL-EVENT-EAP-TIMEOUT-FAILURE "
 #define WPA_EVENT_EAP_TIMEOUT_FAILURE2 "CTRL-EVENT-EAP-TIMEOUT-FAILURE2 "
+#define WPA_EVENT_EAP_ERROR_CODE "EAP-ERROR-CODE "
 /** Network block temporarily disabled (e.g., due to authentication failure) */
 #define WPA_EVENT_TEMP_DISABLED "CTRL-EVENT-SSID-TEMP-DISABLED "
 /** Temporarily disabled network block re-enabled */
@@ -344,6 +345,11 @@ extern "C" {
 /* Event to indicate Probe Request frame;
  * parameters: sa=<STA MAC address> signal=<signal> */
 #define RX_PROBE_REQUEST "RX-PROBE-REQUEST "
+
+/* Event to indicate station's HT/VHT operation mode change information */
+#define STA_OPMODE_MAX_BW_CHANGED "STA-OPMODE-MAX-BW-CHANGED "
+#define STA_OPMODE_SMPS_MODE_CHANGED "STA-OPMODE-SMPS-MODE-CHANGED "
+#define STA_OPMODE_N_SS_CHANGED "STA-OPMODE-N_SS-CHANGED "
 
 /* BSS command information masks */
 

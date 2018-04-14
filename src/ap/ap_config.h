@@ -201,6 +201,12 @@ struct hostapd_lang_string {
 	u8 name[252];
 };
 
+struct hostapd_venue_url {
+	u8 venue_number;
+	u8 url_len;
+	u8 url[254];
+};
+
 #define MAX_NAI_REALMS 10
 #define MAX_NAI_REALMLEN 255
 #define MAX_NAI_EAP_METHODS 5
@@ -345,7 +351,7 @@ struct hostapd_bss_config {
 	/* IEEE 802.11r - Fast BSS Transition */
 	u8 mobility_domain[MOBILITY_DOMAIN_ID_LEN];
 	u8 r1_key_holder[FT_R1KH_ID_LEN];
-	u32 r0_key_lifetime;
+	u32 r0_key_lifetime; /* PMK-R0 lifetime seconds */
 	int rkh_pos_timeout;
 	int rkh_neg_timeout;
 	int rkh_pull_timeout; /* ms */
@@ -356,6 +362,7 @@ struct hostapd_bss_config {
 	int pmk_r1_push;
 	int ft_over_ds;
 	int ft_psk_generate_local;
+	int r1_max_key_lifetime;
 #endif /* CONFIG_IEEE80211R_AP */
 
 	char *ctrl_interface; /* directory for UNIX domain sockets */
@@ -504,6 +511,10 @@ struct hostapd_bss_config {
 	/* IEEE 802.11u - Venue Name duples */
 	unsigned int venue_name_count;
 	struct hostapd_lang_string *venue_name;
+
+	/* Venue URL duples */
+	unsigned int venue_url_count;
+	struct hostapd_venue_url *venue_url;
 
 	/* IEEE 802.11u - Network Authentication Type */
 	u8 *network_auth_type;

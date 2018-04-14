@@ -1330,6 +1330,48 @@ def test_dpp_network_introduction(dev, apdev):
     if val != "DPP":
         raise Exception("Unexpected key_mgmt: " + val)
 
+def test_dpp_and_sae_akm(dev, apdev):
+    """DPP and SAE AKMs"""
+    check_dpp_capab(dev[0])
+    check_dpp_capab(dev[1])
+    if "SAE" not in dev[1].get_capability("auth_alg"):
+        raise HwsimSkip("SAE not supported")
+
+    csign = "3059301306072a8648ce3d020106082a8648ce3d03010703420004d02e5bd81a120762b5f0f2994777f5d40297238a6c294fd575cdf35fabec44c050a6421c401d98d659fd2ed13c961cc8287944dd3202f516977800d3ab2f39ee"
+    ap_connector = "eyJ0eXAiOiJkcHBDb24iLCJraWQiOiJzOEFrYjg5bTV4UGhoYk5UbTVmVVo0eVBzNU5VMkdxYXNRY3hXUWhtQVFRIiwiYWxnIjoiRVMyNTYifQ.eyJncm91cHMiOlt7Imdyb3VwSWQiOiIqIiwibmV0Um9sZSI6ImFwIn1dLCJuZXRBY2Nlc3NLZXkiOnsia3R5IjoiRUMiLCJjcnYiOiJQLTI1NiIsIngiOiIwOHF4TlNYRzRWemdCV3BjVUdNSmc1czNvbElOVFJsRVQ1aERpNkRKY3ZjIiwieSI6IlVhaGFYQXpKRVpRQk1YaHRUQnlZZVlrOWtJYjk5UDA3UV9NcW9TVVZTVEkifX0.a5_nfMVr7Qe1SW0ZL3u6oQRm5NUCYUSfixDAJOUFN3XUfECBZ6E8fm8xjeSfdOytgRidTz0CTlIRjzPQo82dmQ"
+    ap_netaccesskey = "30770201010420f6531d17f29dfab655b7c9e923478d5a345164c489aadd44a3519c3e9dcc792da00a06082a8648ce3d030107a14403420004d3cab13525c6e15ce0056a5c506309839b37a2520d4d19444f98438ba0c972f751a85a5c0cc911940131786d4c1c9879893d9086fdf4fd3b43f32aa125154932"
+    sta_connector = "eyJ0eXAiOiJkcHBDb24iLCJraWQiOiJzOEFrYjg5bTV4UGhoYk5UbTVmVVo0eVBzNU5VMkdxYXNRY3hXUWhtQVFRIiwiYWxnIjoiRVMyNTYifQ.eyJncm91cHMiOlt7Imdyb3VwSWQiOiIqIiwibmV0Um9sZSI6InN0YSJ9XSwibmV0QWNjZXNzS2V5Ijp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiZWMzR3NqQ3lQMzVBUUZOQUJJdEltQnN4WXVyMGJZX1dES1lfSE9zUGdjNCIsInkiOiJTRS1HVllkdWVnTFhLMU1TQXZNMEx2QWdLREpTNWoyQVhCbE9PMTdUSTRBIn19.PDK9zsGlK-e1pEOmNxVeJfCS8pNeay6ckIS1TXCQsR64AR-9wFPCNVjqOxWvVKltehyMFqVAtOcv0IrjtMJFqQ"
+    sta_netaccesskey = "30770201010420bc33380c26fd2168b69cd8242ed1df07ba89aa4813f8d4e8523de6ca3f8dd28ba00a06082a8648ce3d030107a1440342000479cdc6b230b23f7e40405340048b48981b3162eaf46d8fd60ca63f1ceb0f81ce484f8655876e7a02d72b531202f3342ef020283252e63d805c194e3b5ed32380"
+
+    params = { "ssid": "dpp+sae",
+               "wpa": "2",
+               "wpa_key_mgmt": "DPP SAE",
+               "ieee80211w": "2",
+               "rsn_pairwise": "CCMP",
+               "sae_password": "sae-password",
+               "dpp_connector": ap_connector,
+               "dpp_csign": csign,
+               "dpp_netaccesskey": ap_netaccesskey }
+    try:
+        hapd = hostapd.add_ap(apdev[0], params)
+    except:
+        raise HwsimSkip("DPP not supported")
+
+    id = dev[0].connect("dpp+sae", key_mgmt="DPP", scan_freq="2412",
+                        ieee80211w="2",
+                        dpp_csign=csign,
+                        dpp_connector=sta_connector,
+                        dpp_netaccesskey=sta_netaccesskey)
+    val = dev[0].get_status_field("key_mgmt")
+    if val != "DPP":
+        raise Exception("Unexpected key_mgmt for DPP: " + val)
+
+    id = dev[1].connect("dpp+sae", key_mgmt="SAE", scan_freq="2412",
+                        ieee80211w="2", psk="sae-password")
+    val = dev[1].get_status_field("key_mgmt")
+    if val != "SAE":
+        raise Exception("Unexpected key_mgmt for SAE: " + val)
+
 def test_dpp_ap_config(dev, apdev):
     """DPP and AP configuration"""
     run_dpp_ap_config(dev, apdev)
@@ -1370,6 +1412,10 @@ def test_dpp_ap_config_p521_p521(dev, apdev):
     """DPP and AP configuration (P-521 + P-521)"""
     run_dpp_ap_config(dev, apdev, curve="P-521", conf_curve="P-521")
 
+def test_dpp_ap_config_reconfig_configurator(dev, apdev):
+    """DPP and AP configuration with Configurator reconfiguration"""
+    run_dpp_ap_config(dev, apdev, reconf_configurator=True)
+
 def update_hapd_config(hapd):
     ev = hapd.wait_event(["DPP-CONFOBJ-SSID"], timeout=1)
     if ev is None:
@@ -1408,7 +1454,8 @@ def update_hapd_config(hapd):
         hapd.set("dpp_netaccesskey_expiry", net_access_key_expiry)
     hapd.enable()
 
-def run_dpp_ap_config(dev, apdev, curve=None, conf_curve=None):
+def run_dpp_ap_config(dev, apdev, curve=None, conf_curve=None,
+                      reconf_configurator=False):
     check_dpp_capab(dev[0])
     check_dpp_capab(dev[1])
     hapd = hostapd.add_ap(apdev[0], { "ssid": "unconfigured" })
@@ -1431,6 +1478,11 @@ def run_dpp_ap_config(dev, apdev, curve=None, conf_curve=None):
     if "FAIL" in res:
         raise Exception("Failed to add configurator")
     conf_id = int(res)
+
+    if reconf_configurator:
+        csign = dev[0].request("DPP_CONFIGURATOR_GET_KEY %d" % conf_id)
+        if "FAIL" in csign or len(csign) == 0:
+            raise Exception("DPP_CONFIGURATOR_GET_KEY failed")
 
     res = dev[0].request("DPP_QR_CODE " + uri)
     if "FAIL" in res:
@@ -1471,6 +1523,19 @@ def run_dpp_ap_config(dev, apdev, curve=None, conf_curve=None):
     if "FAIL" in res:
         raise Exception("Failed to parse QR Code URI")
     id0b = int(res)
+
+    if reconf_configurator:
+        res = dev[0].request("DPP_CONFIGURATOR_REMOVE %d" % conf_id)
+        if "OK" not in res:
+            raise Exception("DPP_CONFIGURATOR_REMOVE failed")
+        cmd = "DPP_CONFIGURATOR_ADD"
+        if conf_curve:
+            cmd += " curve=" + conf_curve
+        cmd += " key=" + csign
+        res = dev[0].request(cmd);
+        if "FAIL" in res:
+            raise Exception("Failed to add configurator (reconf)")
+        conf_id = int(res)
 
     cmd = "DPP_LISTEN 2412"
     if "OK" not in dev[1].request(cmd):
@@ -2880,7 +2945,14 @@ def test_dpp_own_config_ap(dev, apdev):
     finally:
         dev[0].set("dpp_config_processing", "0")
 
-def run_dpp_own_config_ap(dev, apdev):
+def test_dpp_own_config_ap_reconf(dev, apdev):
+    """DPP configurator (AP) signing own connector and configurator reconf"""
+    try:
+        run_dpp_own_config_ap(dev, apdev)
+    finally:
+        dev[0].set("dpp_config_processing", "0")
+
+def run_dpp_own_config_ap(dev, apdev, reconf_configurator=False):
     check_dpp_capab(dev[0])
     hapd = hostapd.add_ap(apdev[0], { "ssid": "unconfigured" })
     check_dpp_capab(hapd)
@@ -2891,11 +2963,26 @@ def run_dpp_own_config_ap(dev, apdev):
         raise Exception("Failed to add configurator")
     conf_id = int(res)
 
+    if reconf_configurator:
+        csign = hapd.request("DPP_CONFIGURATOR_GET_KEY %d" % conf_id)
+        if "FAIL" in csign or len(csign) == 0:
+            raise Exception("DPP_CONFIGURATOR_GET_KEY failed")
+
     cmd = "DPP_CONFIGURATOR_SIGN  conf=ap-dpp configurator=%d" % (conf_id)
     res = hapd.request(cmd)
     if "FAIL" in res:
         raise Exception("Failed to generate own configuration")
     update_hapd_config(hapd)
+
+    if reconf_configurator:
+        res = hapd.request("DPP_CONFIGURATOR_REMOVE %d" % conf_id)
+        if "OK" not in res:
+            raise Exception("DPP_CONFIGURATOR_REMOVE failed")
+        cmd = "DPP_CONFIGURATOR_ADD key=" + csign
+        res = hapd.request(cmd);
+        if "FAIL" in res:
+            raise Exception("Failed to add configurator (reconf)")
+        conf_id = int(res)
 
     addr = dev[0].own_addr().replace(':', '')
     cmd = "DPP_BOOTSTRAP_GEN type=qrcode chan=81/1 mac=" + addr

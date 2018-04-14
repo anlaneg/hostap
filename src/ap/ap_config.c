@@ -104,6 +104,7 @@ void hostapd_config_defaults_bss(struct hostapd_bss_config *bss)
 	bss->rkh_neg_timeout = 60;
 	bss->rkh_pull_timeout = 1000;
 	bss->rkh_pull_retries = 4;
+	bss->r0_key_lifetime = 1209600;
 #endif /* CONFIG_IEEE80211R_AP */
 
 	bss->radius_das_time_window = 300;
@@ -579,6 +580,7 @@ void hostapd_config_free_bss(struct hostapd_bss_config *conf)
 
 	os_free(conf->roaming_consortium);
 	os_free(conf->venue_name);
+	os_free(conf->venue_url);
 	os_free(conf->nai_realm_data);
 	os_free(conf->network_auth_type);
 	os_free(conf->anqp_3gpp_cell_net);

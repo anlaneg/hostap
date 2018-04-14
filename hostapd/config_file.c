@@ -217,8 +217,10 @@ static int hostapd_config_read_maclist(const char *fname,
 		if (*pos != '\0')
 			vlan_id = atoi(pos);
 
-		if (hostapd_add_acl_maclist(acl, num, vlan_id, addr) < 0)
+		if (hostapd_add_acl_maclist(acl, num, vlan_id, addr) < 0) {
+			fclose(f);
 			return -1;
+		}
 	}
 
 	fclose(f);
@@ -1376,6 +1378,44 @@ static int parse_venue_name(struct hostapd_bss_config *bss, char *pos,
 		return -1;
 	}
 	return 0;
+}
+
+
+static int parse_venue_url(struct hostapd_bss_config *bss, char *pos,
+			    int line)
+{
+	char *sep;
+	size_t nlen;
+	struct hostapd_venue_url *url;
+	int ret = -1;
+
+	sep = os_strchr(pos, ':');
+	if (!sep)
+		goto fail;
+	*sep++ = '\0';
+
+	nlen = os_strlen(sep);
+	if (nlen > 254)
+		goto fail;
+
+	url = os_realloc_array(bss->venue_url, bss->venue_url_count + 1,
+			       sizeof(struct hostapd_venue_url));
+	if (!url)
+		goto fail;
+
+	bss->venue_url = url;
+	url = &bss->venue_url[bss->venue_url_count++];
+
+	url->venue_number = atoi(pos);
+	url->url_len = nlen;
+	os_memcpy(url->url, sep, nlen);
+
+	ret = 0;
+fail:
+	if (ret)
+		wpa_printf(MSG_ERROR, "Line %d: Invalid venue_url '%s'",
+			   line, pos);
+	return ret;
 }
 
 
@@ -2715,7 +2755,12 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 			return 1;
 		}
 	} else if (os_strcmp(buf, "r0_key_lifetime") == 0) {
+		/* DEPRECATED: Use ft_r0_key_lifetime instead. */
+		bss->r0_key_lifetime = atoi(pos) * 60;
+	} else if (os_strcmp(buf, "ft_r0_key_lifetime") == 0) {
 		bss->r0_key_lifetime = atoi(pos);
+	} else if (os_strcmp(buf, "r1_max_key_lifetime") == 0) {
+		bss->r1_max_key_lifetime = atoi(pos);
 	} else if (os_strcmp(buf, "reassociation_deadline") == 0) {
 		bss->reassociation_deadline = atoi(pos);
 	} else if (os_strcmp(buf, "rkh_pos_timeout") == 0) {
@@ -3390,6 +3435,9 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 			return 1;
 	} else if (os_strcmp(buf, "venue_name") == 0) {
 		if (parse_venue_name(bss, pos, line) < 0)
+			return 1;
+	} else if (os_strcmp(buf, "venue_url") == 0) {
+		if (parse_venue_url(bss, pos, line) < 0)
 			return 1;
 	} else if (os_strcmp(buf, "network_auth_type") == 0) {
 		u8 auth_type;

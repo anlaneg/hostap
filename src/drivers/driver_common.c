@@ -84,6 +84,8 @@ const char * event_to_string(enum wpa_event_type event)
 	E2S(DFS_PRE_CAC_EXPIRED);
 	E2S(EXTERNAL_AUTH);
 	E2S(PORT_AUTHORIZED);
+	E2S(STATION_OPMODE_CHANGED);
+	E2S(INTERFACE_MAC_CHANGED);
 	}
 
 	return "UNKNOWN";
