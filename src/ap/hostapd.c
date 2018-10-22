@@ -49,6 +49,7 @@
 #include "rrm.h"
 #include "fils_hlp.h"
 #include "acs.h"
+#include "hs20.h"
 
 
 static int hostapd_flush_old_stations(struct hostapd_data *hapd, u16 reason);
@@ -56,6 +57,8 @@ static int hostapd_setup_encryption(char *iface, struct hostapd_data *hapd);
 static int hostapd_broadcast_wep_clear(struct hostapd_data *hapd);
 static int setup_interface2(struct hostapd_iface *iface);
 static void channel_list_update_timeout(void *eloop_ctx, void *timeout_ctx);
+static void hostapd_interface_setup_failure_handler(void *eloop_ctx,
+						    void *timeout_ctx);
 
 
 int hostapd_for_each_interface(struct hapd_interfaces *interfaces,
@@ -72,6 +75,16 @@ int hostapd_for_each_interface(struct hapd_interfaces *interfaces,
 	}
 
 	return 0;
+}
+
+
+void hostapd_reconfig_encryption(struct hostapd_data *hapd)
+{
+	if (hapd->wpa_auth)
+		return;
+
+	hostapd_set_privacy(hapd, 0);
+	hostapd_setup_encryption(hapd->conf->iface, hapd);
 }
 
 
@@ -429,6 +442,8 @@ static void hostapd_cleanup_iface(struct hostapd_iface *iface)
 {
 	wpa_printf(MSG_DEBUG, "%s(%p)", __func__, iface);
 	eloop_cancel_timeout(channel_list_update_timeout, iface, NULL);
+	eloop_cancel_timeout(hostapd_interface_setup_failure_handler, iface,
+			     NULL);
 
 	hostapd_cleanup_iface_partial(iface);
 	hostapd_config_free(iface->conf);
@@ -896,6 +911,48 @@ hostapd_das_disconnect(void *ctx, struct radius_das_attrs *attr)
 	return RADIUS_DAS_SUCCESS;
 }
 
+
+#ifdef CONFIG_HS20
+static enum radius_das_res
+hostapd_das_coa(void *ctx, struct radius_das_attrs *attr)
+{
+	struct hostapd_data *hapd = ctx;
+	struct sta_info *sta;
+	int multi;
+
+	if (hostapd_das_nas_mismatch(hapd, attr))
+		return RADIUS_DAS_NAS_MISMATCH;
+
+	sta = hostapd_das_find_sta(hapd, attr, &multi);
+	if (!sta) {
+		if (multi) {
+			wpa_printf(MSG_DEBUG,
+				   "RADIUS DAS: Multiple sessions match - not supported");
+			return RADIUS_DAS_MULTI_SESSION_MATCH;
+		}
+		wpa_printf(MSG_DEBUG, "RADIUS DAS: No matching session found");
+		return RADIUS_DAS_SESSION_NOT_FOUND;
+	}
+
+	wpa_printf(MSG_DEBUG, "RADIUS DAS: Found a matching session " MACSTR
+		   " - CoA", MAC2STR(sta->addr));
+
+	if (attr->hs20_t_c_filtering) {
+		if (attr->hs20_t_c_filtering[0] & BIT(0)) {
+			wpa_printf(MSG_DEBUG,
+				   "HS 2.0: Unexpected Terms and Conditions filtering required in CoA-Request");
+			return RADIUS_DAS_COA_FAILED;
+		}
+
+		hs20_t_c_filtering(hapd, sta, 0);
+	}
+
+	return RADIUS_DAS_SUCCESS;
+}
+#else /* CONFIG_HS20 */
+#define hostapd_das_coa NULL
+#endif /* CONFIG_HS20 */
+
 #endif /* CONFIG_NO_RADIUS */
 
 
@@ -1070,6 +1127,7 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
 			conf->radius_das_require_message_authenticator;
 		das_conf.ctx = hapd;
 		das_conf.disconnect = hostapd_das_disconnect;
+		das_conf.coa = hostapd_das_coa;
 		hapd->radius_das = radius_das_init(&das_conf);
 		if (hapd->radius_das == NULL) {
 			wpa_printf(MSG_ERROR, "RADIUS DAS initialization "
@@ -1780,6 +1838,20 @@ static void hostapd_owe_update_trans(struct hostapd_iface *iface)
 }
 
 
+static void hostapd_interface_setup_failure_handler(void *eloop_ctx,
+						    void *timeout_ctx)
+{
+	struct hostapd_iface *iface = eloop_ctx;
+	struct hostapd_data *hapd;
+
+	if (iface->num_bss < 1 || !iface->bss || !iface->bss[0])
+		return;
+	hapd = iface->bss[0];
+	if (hapd->setup_complete_cb)
+		hapd->setup_complete_cb(hapd->setup_complete_cb_ctx);
+}
+
+
 static int hostapd_setup_interface_complete_sync(struct hostapd_iface *iface,
 						 int err)
 {
@@ -1980,8 +2052,19 @@ fail:
 		iface->fst = NULL;
 	}
 #endif /* CONFIG_FST */
-	if (iface->interfaces && iface->interfaces->terminate_on_error)
+
+	if (iface->interfaces && iface->interfaces->terminate_on_error) {
 		eloop_terminate();
+	} else if (hapd->setup_complete_cb) {
+		/*
+		 * Calling hapd->setup_complete_cb directly may cause iface
+		 * deinitialization which may be accessed later by the caller.
+		 */
+		eloop_register_timeout(0, 0,
+				       hostapd_interface_setup_failure_handler,
+				       iface, NULL);
+	}
+
 	return -1;
 }
 
@@ -2163,12 +2246,6 @@ void hostapd_interface_deinit(struct hostapd_iface *iface)
 
 	hostapd_set_state(iface, HAPD_IFACE_DISABLED);
 
-#ifdef CONFIG_IEEE80211N
-#ifdef NEED_AP_MLME
-	hostapd_stop_setup_timers(iface);
-	eloop_cancel_timeout(ap_ht2040_timeout, iface, NULL);
-#endif /* NEED_AP_MLME */
-#endif /* CONFIG_IEEE80211N */
 	eloop_cancel_timeout(channel_list_update_timeout, iface, NULL);
 	iface->wait_channel_update = 0;
 
@@ -2184,6 +2261,13 @@ void hostapd_interface_deinit(struct hostapd_iface *iface)
 			break;
 		hostapd_bss_deinit(iface->bss[j]);
 	}
+
+#ifdef CONFIG_IEEE80211N
+#ifdef NEED_AP_MLME
+	hostapd_stop_setup_timers(iface);
+	eloop_cancel_timeout(ap_ht2040_timeout, iface, NULL);
+#endif /* NEED_AP_MLME */
+#endif /* CONFIG_IEEE80211N */
 }
 
 
@@ -2537,6 +2621,11 @@ int hostapd_disable_iface(struct hostapd_iface *hapd_iface)
 	hapd_iface->driver_ap_teardown =
 		!!(hapd_iface->drv_flags &
 		   WPA_DRIVER_FLAGS_AP_TEARDOWN_SUPPORT);
+
+#ifdef NEED_AP_MLME
+	for (j = 0; j < hapd_iface->num_bss; j++)
+		hostapd_cleanup_cs_params(hapd_iface->bss[j]);
+#endif /* NEED_AP_MLME */
 
 	/* same as hostapd_interface_deinit without deinitializing ctrl-iface */
 	for (j = 0; j < hapd_iface->num_bss; j++) {
@@ -3299,6 +3388,19 @@ void hostapd_cleanup_cs_params(struct hostapd_data *hapd)
 }
 
 
+void hostapd_chan_switch_vht_config(struct hostapd_data *hapd, int vht_enabled)
+{
+	if (vht_enabled)
+		hapd->iconf->ch_switch_vht_config |= CH_SWITCH_VHT_ENABLED;
+	else
+		hapd->iconf->ch_switch_vht_config |= CH_SWITCH_VHT_DISABLED;
+
+	hostapd_logger(hapd, NULL, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_INFO, "CHAN_SWITCH VHT CONFIG 0x%x",
+		       hapd->iconf->ch_switch_vht_config);
+}
+
+
 int hostapd_switch_channel(struct hostapd_data *hapd,
 			   struct csa_settings *settings)
 {
@@ -3333,7 +3435,6 @@ hostapd_switch_channel_fallback(struct hostapd_iface *iface,
 				const struct hostapd_freq_params *freq_params)
 {
 	int vht_seg0_idx = 0, vht_seg1_idx = 0, vht_bw = VHT_CHANWIDTH_USE_HT;
-	unsigned int i;
 
 	wpa_printf(MSG_DEBUG, "Restarting all CSA-related BSSes");
 
@@ -3375,10 +3476,8 @@ hostapd_switch_channel_fallback(struct hostapd_iface *iface,
 	/*
 	 * cs_params must not be cleared earlier because the freq_params
 	 * argument may actually point to one of these.
+	 * These params will be cleared during interface disable below.
 	 */
-	for (i = 0; i < iface->num_bss; i++)
-		hostapd_cleanup_cs_params(iface->bss[i]);
-
 	hostapd_disable_iface(iface);
 	hostapd_enable_iface(iface);
 }

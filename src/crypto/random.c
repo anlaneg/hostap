@@ -55,8 +55,6 @@ static unsigned int own_pool_ready = 0;
 #define RANDOM_ENTROPY_SIZE 20
 //random_entropy文件路径
 static char *random_entropy_file = NULL;
-//标明random_entropy文件已被读取
-static int random_entropy_file_read = 0;
 
 #define MIN_COLLECT_ENTROPY 1000
 static unsigned int entropy = 0;
@@ -359,7 +357,6 @@ static void random_read_entropy(void)
 
 	own_pool_ready = (u8) buf[0];
 	random_add_randomness(buf + 1, RANDOM_ENTROPY_SIZE);
-	random_entropy_file_read = 1;
 	os_free(buf);
 	wpa_printf(MSG_DEBUG, "random: Added entropy from %s "
 		   "(own_pool_ready=%u)",

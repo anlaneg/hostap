@@ -1820,6 +1820,8 @@ static void eap_user_free(struct eap_user *user)
 		return;
 	bin_clear_free(user->password, user->password_len);
 	user->password = NULL;
+	bin_clear_free(user->salt, user->salt_len);
+	user->salt = NULL;
 	os_free(user);
 }
 
@@ -1918,6 +1920,7 @@ void eap_server_sm_deinit(struct eap_sm *sm)
 	wpabuf_free(sm->lastReqData);
 	wpabuf_free(sm->eap_if.eapRespData);
 	os_free(sm->identity);
+	os_free(sm->serial_num);
 	os_free(sm->pac_opaque_encr_key);
 	os_free(sm->eap_fast_a_id);
 	os_free(sm->eap_fast_a_id_info);
@@ -1986,6 +1989,17 @@ const u8 * eap_get_identity(struct eap_sm *sm, size_t *len)
 {
 	*len = sm->identity_len;
 	return sm->identity;
+}
+
+
+/**
+ * eap_get_serial_num - Get the serial number of user certificate
+ * @sm: Pointer to EAP state machine allocated with eap_server_sm_init()
+ * Returns: Pointer to the serial number or %NULL if not available
+ */
+const char * eap_get_serial_num(struct eap_sm *sm)
+{
+	return sm->serial_num;
 }
 
 

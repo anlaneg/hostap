@@ -160,6 +160,8 @@ struct hostapd_eap_user {
 	} methods[EAP_MAX_METHODS];
 	u8 *password;
 	size_t password_len;
+	u8 *salt;
+	size_t salt_len; /* non-zero when password is salted */
 	int phase2;
 	int force_version;
 	unsigned int wildcard_prefix:1;
@@ -169,6 +171,7 @@ struct hostapd_eap_user {
 	unsigned int macacl:1;
 	int ttls_auth; /* EAP_TTLS_AUTH_* bitfield */
 	struct hostapd_radius_attr *accept_attr;
+	u32 t_c_timestamp;
 };
 
 struct hostapd_radius_attr {
@@ -236,6 +239,12 @@ struct fils_realm {
 	char realm[];
 };
 
+struct sae_password_entry {
+	struct sae_password_entry *next;
+	char *password;
+	char *identifier;
+	u8 peer_addr[ETH_ALEN];
+};
 
 /**
  * struct hostapd_bss_config - Per-BSS configuration
@@ -577,13 +586,20 @@ struct hostapd_bss_config {
 		char **icons;
 		size_t icons_count;
 		char *osu_nai;
+		char *osu_nai2;
 		unsigned int service_desc_count;
 		struct hostapd_lang_string *service_desc;
 	} *hs20_osu_providers, *last_osu;
 	size_t hs20_osu_providers_count;
+	size_t hs20_osu_providers_nai_count;
+	char **hs20_operator_icon;
+	size_t hs20_operator_icon_count;
 	unsigned int hs20_deauth_req_timeout;
 	char *subscr_remediation_url;
 	u8 subscr_remediation_method;
+	char *t_c_filename;
+	u32 t_c_timestamp;
+	char *t_c_server_url;
 #endif /* CONFIG_HS20 */
 
 	u8 wps_rf_bands; /* RF bands for WPS (WPS_RF_*) */
@@ -599,7 +615,7 @@ struct hostapd_bss_config {
 	unsigned int sae_sync;
 	int sae_require_mfp;
 	int *sae_groups;
-	char *sae_password;
+	struct sae_password_entry *sae_passwords;
 
 	char *wowlan_triggers; /* Wake-on-WLAN triggers */
 
@@ -815,6 +831,11 @@ struct hostapd_config {
 	struct he_phy_capabilities_info he_phy_capab;
 	struct he_operation he_op;
 #endif /* CONFIG_IEEE80211AX */
+
+	/* VHT enable/disable config from CHAN_SWITCH */
+#define CH_SWITCH_VHT_ENABLED BIT(0)
+#define CH_SWITCH_VHT_DISABLED BIT(1)
+	unsigned int ch_switch_vht_config;
 };
 
 

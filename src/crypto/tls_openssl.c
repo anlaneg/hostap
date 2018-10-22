@@ -59,7 +59,8 @@ typedef int stack_index_t;
 #endif /* SSL_set_tlsext_status_type */
 
 #if (OPENSSL_VERSION_NUMBER < 0x10100000L || \
-     defined(LIBRESSL_VERSION_NUMBER)) &&    \
+     (defined(LIBRESSL_VERSION_NUMBER) && \
+      LIBRESSL_VERSION_NUMBER < 0x20700000L)) && \
     !defined(BORINGSSL_API_VERSION)
 /*
  * SSL_get_client_random() and SSL_get_server_random() were added in OpenSSL
@@ -110,6 +111,12 @@ static int RSA_bits(const RSA *r)
 	return BN_num_bits(r->n);
 }
 #endif /* CONFIG_SUITEB */
+
+
+static const unsigned char * ASN1_STRING_get0_data(const ASN1_STRING *x)
+{
+	return ASN1_STRING_data((ASN1_STRING *) x);
+}
 #endif
 
 #ifdef ANDROID
@@ -231,6 +238,8 @@ struct tls_connection {
 	unsigned int server_cert_only:1;
 	unsigned int invalid_hb_used:1;
 	unsigned int success_data:1;
+	unsigned int client_hello_generated:1;
+	unsigned int server:1;
 
 	u8 srv_cert_hash[32];
 
@@ -931,7 +940,9 @@ void * tls_init(const struct tls_config *conf)
 		}
 #endif /* OPENSSL_FIPS */
 #endif /* CONFIG_FIPS */
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || \
+	(defined(LIBRESSL_VERSION_NUMBER) && \
+	 LIBRESSL_VERSION_NUMBER < 0x20700000L)
 		SSL_load_error_strings();
 		SSL_library_init();
 #ifndef OPENSSL_NO_SHA256
@@ -1019,8 +1030,10 @@ void * tls_init(const struct tls_config *conf)
 
 #ifndef OPENSSL_NO_ENGINE
 	wpa_printf(MSG_DEBUG, "ENGINE: Loading dynamic engine");
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 	ERR_load_ENGINE_strings();
 	ENGINE_load_dynamic();
+#endif /* OPENSSL_VERSION_NUMBER */
 
 	if (conf &&
 	    (conf->opensc_engine_path || conf->pkcs11_engine_path ||
@@ -1063,7 +1076,9 @@ void tls_deinit(void *ssl_ctx)
 
 	tls_openssl_ref_count--;
 	if (tls_openssl_ref_count == 0) {
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || \
+	(defined(LIBRESSL_VERSION_NUMBER) && \
+	 LIBRESSL_VERSION_NUMBER < 0x20700000L)
 #ifndef OPENSSL_NO_ENGINE
 		ENGINE_cleanup();
 #endif /* OPENSSL_NO_ENGINE */
@@ -1531,6 +1546,31 @@ int tls_connection_established(void *ssl_ctx, struct tls_connection *conn)
 }
 
 
+char * tls_connection_peer_serial_num(void *tls_ctx,
+				      struct tls_connection *conn)
+{
+	ASN1_INTEGER *ser;
+	char *serial_num;
+	size_t len;
+
+	if (!conn->peer_cert)
+		return NULL;
+
+	ser = X509_get_serialNumber(conn->peer_cert);
+	if (!ser)
+		return NULL;
+
+	len = ASN1_STRING_length(ser) * 2 + 1;
+	serial_num = os_malloc(len);
+	if (!serial_num)
+		return NULL;
+	wpa_snprintf_hex_uppercase(serial_num, len,
+				   ASN1_STRING_get0_data(ser),
+				   ASN1_STRING_length(ser));
+	return serial_num;
+}
+
+
 int tls_connection_shutdown(void *ssl_ctx, struct tls_connection *conn)
 {
 	if (conn == NULL)
@@ -1815,6 +1855,8 @@ static void openssl_tls_cert_event(struct tls_connection *conn,
 	GENERAL_NAME *gen;
 	void *ext;
 	stack_index_t i;
+	ASN1_INTEGER *ser;
+	char serial_num[128];
 #ifdef CONFIG_SHA256
 	u8 hash[32];
 #endif /* CONFIG_SHA256 */
@@ -1842,6 +1884,14 @@ static void openssl_tls_cert_event(struct tls_connection *conn,
 #endif /* CONFIG_SHA256 */
 	ev.peer_cert.depth = depth;
 	ev.peer_cert.subject = subject;
+
+	ser = X509_get_serialNumber(err_cert);
+	if (ser) {
+		wpa_snprintf_hex_uppercase(serial_num, sizeof(serial_num),
+					   ASN1_STRING_get0_data(ser),
+					   ASN1_STRING_length(ser));
+		ev.peer_cert.serial_num = serial_num;
+	}
 
 	ext = X509_get_ext_d2i(err_cert, NID_subject_alt_name, NULL, NULL);
 	for (i = 0; ext && i < sk_GENERAL_NAME_num(ext); i++) {
@@ -2463,6 +2513,12 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags,
 	else
 		SSL_clear_options(ssl, SSL_OP_NO_TLSv1_2);
 #endif /* SSL_OP_NO_TLSv1_2 */
+#ifdef SSL_OP_NO_TLSv1_3
+	if (flags & TLS_CONN_DISABLE_TLSv1_3)
+		SSL_set_options(ssl, SSL_OP_NO_TLSv1_3);
+	else
+		SSL_clear_options(ssl, SSL_OP_NO_TLSv1_3);
+#endif /* SSL_OP_NO_TLSv1_3 */
 #ifdef CONFIG_SUITEB
 #ifdef OPENSSL_IS_BORINGSSL
 	/* Start with defaults from BoringSSL */
@@ -3409,7 +3465,9 @@ int tls_connection_get_random(void *ssl_ctx, struct tls_connection *conn,
 #ifdef OPENSSL_NEED_EAP_FAST_PRF
 static int openssl_get_keyblock_size(SSL *ssl)
 {
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || \
+	(defined(LIBRESSL_VERSION_NUMBER) && \
+	 LIBRESSL_VERSION_NUMBER < 0x20700000L)
 	const EVP_CIPHER *c;
 	const EVP_MD *h;
 	int md_size;
@@ -3556,8 +3614,7 @@ int tls_connection_get_eap_fast_key(void *tls_ctx, struct tls_connection *conn,
 
 
 static struct wpabuf *
-openssl_handshake(struct tls_connection *conn, const struct wpabuf *in_data,
-		  int server)
+openssl_handshake(struct tls_connection *conn, const struct wpabuf *in_data)
 {
 	int res;
 	struct wpabuf *out_data;
@@ -3575,7 +3632,7 @@ openssl_handshake(struct tls_connection *conn, const struct wpabuf *in_data,
 	}
 
 	/* Initiate TLS handshake or continue the existing handshake */
-	if (server)
+	if (conn->server)
 		res = SSL_accept(conn->ssl);
 	else
 		res = SSL_connect(conn->ssl);
@@ -3590,11 +3647,25 @@ openssl_handshake(struct tls_connection *conn, const struct wpabuf *in_data,
 		else {
 			tls_show_errors(MSG_INFO, __func__, "SSL_connect");
 			conn->failed++;
+			if (!conn->server && !conn->client_hello_generated) {
+				/* The server would not understand TLS Alert
+				 * before ClientHello, so simply terminate
+				 * handshake on this type of error case caused
+				 * by a likely internal error like no ciphers
+				 * available. */
+				wpa_printf(MSG_DEBUG,
+					   "OpenSSL: Could not generate ClientHello");
+				conn->write_alerts++;
+				return NULL;
+			}
 		}
 	}
 
+	if (!conn->server && !conn->failed)
+		conn->client_hello_generated = 1;
+
 #ifdef CONFIG_SUITEB
-	if ((conn->flags & TLS_CONN_SUITEB) && !server &&
+	if ((conn->flags & TLS_CONN_SUITEB) && !conn->server &&
 	    os_strncmp(SSL_get_cipher(conn->ssl), "DHE-", 4) == 0 &&
 	    conn->server_dh_prime_len < 3072) {
 		struct tls_context *context = conn->context;
@@ -3697,14 +3768,14 @@ openssl_get_appl_data(struct tls_connection *conn, size_t max_len)
 static struct wpabuf *
 openssl_connection_handshake(struct tls_connection *conn,
 			     const struct wpabuf *in_data,
-			     struct wpabuf **appl_data, int server)
+			     struct wpabuf **appl_data)
 {
 	struct wpabuf *out_data;
 
 	if (appl_data)
 		*appl_data = NULL;
 
-	out_data = openssl_handshake(conn, in_data, server);
+	out_data = openssl_handshake(conn, in_data);
 	if (out_data == NULL)
 		return NULL;
 	if (conn->invalid_hb_used) {
@@ -3741,7 +3812,7 @@ tls_connection_handshake(void *ssl_ctx, struct tls_connection *conn,
 			 const struct wpabuf *in_data,
 			 struct wpabuf **appl_data)
 {
-	return openssl_connection_handshake(conn, in_data, appl_data, 0);
+	return openssl_connection_handshake(conn, in_data, appl_data);
 }
 
 
@@ -3750,7 +3821,8 @@ struct wpabuf * tls_connection_server_handshake(void *tls_ctx,
 						const struct wpabuf *in_data,
 						struct wpabuf **appl_data)
 {
-	return openssl_connection_handshake(conn, in_data, appl_data, 1);
+	conn->server = 1;
+	return openssl_connection_handshake(conn, in_data, appl_data);
 }
 
 
@@ -3845,7 +3917,7 @@ struct wpabuf * tls_connection_decrypt(void *tls_ctx,
 
 int tls_connection_resumed(void *ssl_ctx, struct tls_connection *conn)
 {
-	return conn ? SSL_cache_hit(conn->ssl) : 0;
+	return conn ? SSL_session_reused(conn->ssl) : 0;
 }
 
 
@@ -4345,6 +4417,7 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 	}
 #endif
 #if OPENSSL_VERSION_NUMBER >= 0x10101000L
+#ifdef SSL_OP_NO_TLSv1_3
 	if (params->flags & TLS_CONN_EAP_FAST) {
 		/* Need to disable TLS v1.3 at least for now since OpenSSL 1.1.1
 		 * refuses to start the handshake with the modified ciphersuite
@@ -4352,6 +4425,7 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 		wpa_printf(MSG_DEBUG, "OpenSSL: Disable TLSv1.3 for EAP-FAST");
 		SSL_set_options(conn->ssl, SSL_OP_NO_TLSv1_3);
 	}
+#endif /* SSL_OP_NO_TLSv1_3 */
 #endif
 #endif /* EAP_FAST || EAP_FAST_DYNAMIC || EAP_SERVER_FAST */
 
@@ -4535,7 +4609,9 @@ static int tls_sess_sec_cb(SSL *s, void *secret, int *secret_len,
 	struct tls_connection *conn = arg;
 	int ret;
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || \
+	(defined(LIBRESSL_VERSION_NUMBER) && \
+	 LIBRESSL_VERSION_NUMBER < 0x20700000L)
 	if (conn == NULL || conn->session_ticket_cb == NULL)
 		return 0;
 

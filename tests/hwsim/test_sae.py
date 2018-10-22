@@ -306,6 +306,23 @@ def test_sae_mixed_mfp(dev, apdev):
     dev[2].connect("test-sae", psk="12345678", ieee80211w="0", scan_freq="2412")
     dev[2].dump_monitor()
 
+def test_sae_mfp(dev, apdev):
+    """SAE and MFP enabled without sae_require_mfp"""
+    if "SAE" not in dev[0].get_capability("auth_alg"):
+        raise HwsimSkip("SAE not supported")
+    params = hostapd.wpa2_params(ssid="test-sae", passphrase="12345678")
+    params['wpa_key_mgmt'] = 'SAE'
+    params["ieee80211w"] = "1"
+    hostapd.add_ap(apdev[0], params)
+
+    dev[0].request("SET sae_groups ")
+    dev[0].connect("test-sae", psk="12345678", key_mgmt="SAE", ieee80211w="2",
+                   scan_freq="2412")
+
+    dev[1].request("SET sae_groups ")
+    dev[1].connect("test-sae", psk="12345678", key_mgmt="SAE", ieee80211w="0",
+                   scan_freq="2412")
+
 @remote_compatible
 def test_sae_missing_password(dev, apdev):
     """SAE and missing password"""
@@ -1056,10 +1073,13 @@ def test_sae_bignum_failure(dev, apdev):
               (1, "crypto_ec_point_from_bin;sae_parse_commit_element_ecc") ]
     for count, func in tests:
         with fail_test(dev[0], count, func):
+            hapd.request("NOTE STA failure testing %d:%s" % (count, func))
             dev[0].connect("test-sae", psk="12345678", key_mgmt="SAE",
                            scan_freq="2412", wait_connect=False)
             wait_fail_trigger(dev[0], "GET_FAIL")
             dev[0].request("REMOVE_NETWORK all")
+            dev[0].dump_monitor()
+            hapd.dump_monitor()
 
     dev[0].request("SET sae_groups 5")
     tests = [ (1, "crypto_bignum_init_set;sae_set_group"),
@@ -1082,10 +1102,13 @@ def test_sae_bignum_failure(dev, apdev):
               (1, "crypto_bignum_exptmod;sae_parse_commit_element_ffc") ]
     for count, func in tests:
         with fail_test(dev[0], count, func):
+            hapd.request("NOTE STA failure testing %d:%s" % (count, func))
             dev[0].connect("test-sae", psk="12345678", key_mgmt="SAE",
                            scan_freq="2412", wait_connect=False)
             wait_fail_trigger(dev[0], "GET_FAIL")
             dev[0].request("REMOVE_NETWORK all")
+            dev[0].dump_monitor()
+            hapd.dump_monitor()
 
     dev[0].request("SET sae_groups 22")
     tests = [ (1, "crypto_bignum_init_set;sae_test_pwd_seed_ffc"),
@@ -1093,10 +1116,13 @@ def test_sae_bignum_failure(dev, apdev):
               (1, "crypto_bignum_div;sae_test_pwd_seed_ffc") ]
     for count, func in tests:
         with fail_test(dev[0], count, func):
+            hapd.request("NOTE STA failure testing %d:%s" % (count, func))
             dev[0].connect("test-sae", psk="12345678", key_mgmt="SAE",
                            scan_freq="2412", wait_connect=False)
             wait_fail_trigger(dev[0], "GET_FAIL")
             dev[0].request("REMOVE_NETWORK all")
+            dev[0].dump_monitor()
+            hapd.dump_monitor()
 
 def test_sae_invalid_anti_clogging_token_req(dev, apdev):
     """SAE and invalid anti-clogging token request"""
@@ -1246,3 +1272,73 @@ def test_sae_connect_cmd(dev, apdev):
                          timeout=15)
     if ev is None:
         raise Exception("No connection result reported")
+
+def test_sae_password_id(dev, apdev):
+    """SAE and password identifier"""
+    if "SAE" not in dev[0].get_capability("auth_alg"):
+        raise HwsimSkip("SAE not supported")
+    params = hostapd.wpa2_params(ssid="test-sae")
+    params['wpa_key_mgmt'] = 'SAE'
+    params['sae_password'] = [ 'secret|mac=ff:ff:ff:ff:ff:ff|id=pw id',
+                               'foo|mac=02:02:02:02:02:02',
+                               'another secret|mac=ff:ff:ff:ff:ff:ff|id=' + 29*'A' ]
+    hapd = hostapd.add_ap(apdev[0], params)
+
+    dev[0].request("SET sae_groups ")
+    dev[0].connect("test-sae", sae_password="secret", sae_password_id="pw id",
+                   key_mgmt="SAE", scan_freq="2412")
+    dev[0].request("REMOVE_NETWORK all")
+    dev[0].wait_disconnected()
+
+    # SAE Password Identifier element with the exact same length as the
+    # optional Anti-Clogging Token field
+    dev[0].connect("test-sae", sae_password="another secret",
+                   sae_password_id=29*'A',
+                   key_mgmt="SAE", scan_freq="2412")
+    dev[0].request("REMOVE_NETWORK all")
+    dev[0].wait_disconnected()
+
+    dev[0].connect("test-sae", sae_password="secret", sae_password_id="unknown",
+                   key_mgmt="SAE", scan_freq="2412", wait_connect=False)
+
+    ev = dev[0].wait_event(["CTRL-EVENT-SAE-UNKNOWN-PASSWORD-IDENTIFIER"],
+                           timeout=10)
+    if ev is None:
+        raise Exception("Unknown password identifier not reported")
+    dev[0].request("REMOVE_NETWORK all")
+
+def test_sae_forced_anti_clogging_pw_id(dev, apdev):
+    """SAE anti clogging (forced and Password Identifier)"""
+    if "SAE" not in dev[0].get_capability("auth_alg"):
+        raise HwsimSkip("SAE not supported")
+    params = hostapd.wpa2_params(ssid="test-sae")
+    params['wpa_key_mgmt'] = 'SAE'
+    params['sae_anti_clogging_threshold'] = '0'
+    params['sae_password'] = 'secret|id=' + 29*'A'
+    hostapd.add_ap(apdev[0], params)
+    for i in range(0, 2):
+        dev[i].request("SET sae_groups ")
+        dev[i].connect("test-sae", sae_password="secret",
+                       sae_password_id=29*'A', key_mgmt="SAE", scan_freq="2412")
+
+def test_sae_reauth(dev, apdev):
+    """SAE reauthentication"""
+    if "SAE" not in dev[0].get_capability("auth_alg"):
+        raise HwsimSkip("SAE not supported")
+    params = hostapd.wpa2_params(ssid="test-sae",
+                                 passphrase="12345678")
+    params['wpa_key_mgmt'] = 'SAE'
+    params["ieee80211w"] = "2"
+    hapd = hostapd.add_ap(apdev[0], params)
+
+    dev[0].request("SET sae_groups ")
+    id = dev[0].connect("test-sae", psk="12345678", key_mgmt="SAE",
+                        ieee80211w="2", scan_freq="2412")
+
+    hapd.set("ext_mgmt_frame_handling", "1")
+    dev[0].request("DISCONNECT")
+    dev[0].wait_disconnected(timeout=10)
+    hapd.set("ext_mgmt_frame_handling", "0")
+    dev[0].request("PMKSA_FLUSH")
+    dev[0].request("REASSOCIATE")
+    dev[0].wait_connected(timeout=10, error="Timeout on re-connection")

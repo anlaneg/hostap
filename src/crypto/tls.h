@@ -64,6 +64,7 @@ union tls_event_data {
 		size_t hash_len;
 		const char *altsubject[TLS_MAX_ALT_SUBJECT];
 		int num_altsubject;
+		const char *serial_num;
 	} peer_cert;
 
 	struct {
@@ -101,6 +102,7 @@ struct tls_config {
 #define TLS_CONN_REQUIRE_OCSP_ALL BIT(10)
 #define TLS_CONN_SUITEB BIT(11)
 #define TLS_CONN_SUITEB_NO_ECDH BIT(12)
+#define TLS_CONN_DISABLE_TLSv1_3 BIT(13)
 
 /**
  * struct tls_connection_params - Parameters for TLS connection
@@ -250,6 +252,18 @@ void tls_connection_deinit(void *tls_ctx, struct tls_connection *conn);
  * Returns: 1 if TLS connection has been completed, 0 if not.
  */
 int tls_connection_established(void *tls_ctx, struct tls_connection *conn);
+
+/**
+ * tls_connection_peer_serial_num - Fetch peer certificate serial number
+ * @tls_ctx: TLS context data from tls_init()
+ * @conn: Connection context data from tls_connection_init()
+ * Returns: Allocated string buffer containing the peer certificate serial
+ * number or %NULL on error.
+ *
+ * The caller is responsible for freeing the returned buffer with os_free().
+ */
+char * tls_connection_peer_serial_num(void *tls_ctx,
+				      struct tls_connection *conn);
 
 /**
  * tls_connection_shutdown - Shutdown TLS connection

@@ -379,7 +379,8 @@ class WpaSupplicant:
         quoted = [ "realm", "username", "password", "domain", "imsi",
                    "excluded_ssid", "milenage", "ca_cert", "client_cert",
                    "private_key", "domain_suffix_match", "provisioning_sp",
-                   "roaming_partner", "phase1", "phase2", "private_key_passwd" ]
+                   "roaming_partner", "phase1", "phase2", "private_key_passwd",
+                   "roaming_consortiums" ]
         for field in quoted:
             if field in params:
                 self.set_cred_quoted(id, field, params[field])
@@ -1010,7 +1011,8 @@ class WpaSupplicant:
                    "private_key2", "phase1", "phase2", "domain_suffix_match",
                    "altsubject_match", "subject_match", "pac_file", "dh_file",
                    "bgscan", "ht_mcs", "id_str", "openssl_ciphers",
-                   "domain_match", "dpp_connector", "sae_password" ]
+                   "domain_match", "dpp_connector", "sae_password",
+                   "sae_password_id" ]
         for field in quoted:
             if field in kwargs and kwargs[field]:
                 self.set_network_quoted(id, field, kwargs[field])
@@ -1028,7 +1030,8 @@ class WpaSupplicant:
                        "engine", "fils_dh_group", "bssid_hint",
                        "dpp_csign", "dpp_csign_expiry",
                        "dpp_netaccesskey", "dpp_netaccesskey_expiry",
-                       "group_mgmt", "owe_group" ]
+                       "group_mgmt", "owe_group",
+                       "roaming_consortium_selection" ]
         for field in not_quoted:
             if field in kwargs and kwargs[field]:
                 self.set_network(id, field, kwargs[field])
@@ -1312,3 +1315,6 @@ class WpaSupplicant:
         if "OK" not in self.global_request("%s %s adv_id=%s adv_mac=%s session=%d session_mac=%s %s" %
                                            (cmd, peer, adv_id, adv_mac, session_id, session_mac, params)):
             raise Exception("%s request failed" % cmd)
+
+    def note(self, txt):
+        self.request("NOTE " + txt)

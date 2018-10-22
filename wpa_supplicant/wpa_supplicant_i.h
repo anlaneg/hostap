@@ -532,6 +532,8 @@ struct wpa_supplicant {
 	struct wpa_bss *current_bss;
 	int ap_ies_from_associnfo;
 	unsigned int assoc_freq;
+	u8 *last_con_fail_realm;
+	size_t last_con_fail_realm_len;
 
 	/* Selected configuration (based on Beacon/ProbeResp WPA IE) */
 	int pairwise_cipher;
@@ -741,6 +743,8 @@ struct wpa_supplicant {
 	unsigned int mac_addr_changed:1;
 	unsigned int added_vif:1;
 	unsigned int wnmsleep_used:1;
+	unsigned int owe_transition_select:1;
+	unsigned int owe_transition_search:1;
 
 	struct os_reltime last_mac_addr_change;
 	int last_mac_addr_style;
@@ -1182,6 +1186,8 @@ struct wpa_supplicant {
 	/* RIC elements for FT protocol */
 	struct wpabuf *ric_ies;
 
+	int last_auth_timeout_sec;
+
 #ifdef CONFIG_DPP
 	struct dl_list dpp_bootstrap; /* struct dpp_bootstrap_info */
 	struct dl_list dpp_configurator; /* struct dpp_configurator */
@@ -1223,6 +1229,7 @@ struct wpa_supplicant {
 #ifdef CONFIG_FILS
 	unsigned int disable_fils:1;
 #endif /* CONFIG_FILS */
+	unsigned int ieee80211ac:1;
 };
 
 
@@ -1255,6 +1262,7 @@ void wpa_supplicant_initiate_eapol(struct wpa_supplicant *wpa_s);
 void wpa_clear_keys(struct wpa_supplicant *wpa_s, const u8 *addr);
 void wpa_supplicant_req_auth_timeout(struct wpa_supplicant *wpa_s,
 				     int sec, int usec);
+void wpas_auth_timeout_restart(struct wpa_supplicant *wpa_s, int sec_diff);
 void wpa_supplicant_reinit_autoscan(struct wpa_supplicant *wpa_s);
 void wpa_supplicant_set_state(struct wpa_supplicant *wpa_s,
 			      enum wpa_states state);
@@ -1312,6 +1320,7 @@ void wpa_supplicant_rx_eapol(void *ctx, const u8 *src_addr,
 void wpa_supplicant_update_config(struct wpa_supplicant *wpa_s);
 void wpa_supplicant_clear_status(struct wpa_supplicant *wpa_s);
 void wpas_connection_failed(struct wpa_supplicant *wpa_s, const u8 *bssid);
+void fils_connection_failure(struct wpa_supplicant *wpa_s);
 int wpas_driver_bss_selection(struct wpa_supplicant *wpa_s);
 int wpas_is_p2p_prioritized(struct wpa_supplicant *wpa_s);
 void wpas_auth_failed(struct wpa_supplicant *wpa_s, char *reason);
@@ -1352,7 +1361,9 @@ void wpas_flush_fils_hlp_req(struct wpa_supplicant *wpa_s);
 
 
 /* MBO functions */
-int wpas_mbo_ie(struct wpa_supplicant *wpa_s, u8 *buf, size_t len);
+int wpas_mbo_ie(struct wpa_supplicant *wpa_s, u8 *buf, size_t len,
+		int add_oce_capa);
+const u8 * mbo_attr_from_mbo_ie(const u8 *mbo_ie, enum mbo_attr_id attr);
 const u8 * wpas_mbo_get_bss_attr(struct wpa_bss *bss, enum mbo_attr_id attr);
 int wpas_mbo_update_non_pref_chan(struct wpa_supplicant *wpa_s,
 				  const char *non_pref_chan);

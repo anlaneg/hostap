@@ -540,6 +540,7 @@ int hostapd_for_each_interface(struct hapd_interfaces *interfaces,
 			       int (*cb)(struct hostapd_iface *iface,
 					 void *ctx), void *ctx);
 int hostapd_reload_config(struct hostapd_iface *iface);
+void hostapd_reconfig_encryption(struct hostapd_data *hapd);
 struct hostapd_data *
 hostapd_alloc_bss_data(struct hostapd_iface *hapd_iface,
 		       struct hostapd_config *conf,
@@ -566,6 +567,7 @@ void hostapd_channel_list_updated(struct hostapd_iface *iface, int initiator);
 void hostapd_set_state(struct hostapd_iface *iface, enum hostapd_iface_state s);
 const char * hostapd_state_text(enum hostapd_iface_state s);
 int hostapd_csa_in_progress(struct hostapd_iface *iface);
+void hostapd_chan_switch_vht_config(struct hostapd_data *hapd, int vht_enabled);
 int hostapd_switch_channel(struct hostapd_data *hapd,
 			   struct csa_settings *settings);
 void

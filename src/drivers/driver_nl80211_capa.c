@@ -415,6 +415,19 @@ static void wiphy_info_ext_feature_flags(struct wiphy_info_data *info,
 	if (ext_feature_isset(ext_features, len,
 			      NL80211_EXT_FEATURE_DFS_OFFLOAD))
 		capa->flags |= WPA_DRIVER_FLAGS_DFS_OFFLOAD;
+
+#ifdef CONFIG_MBO
+	if (ext_feature_isset(ext_features, len,
+			      NL80211_EXT_FEATURE_FILS_MAX_CHANNEL_TIME) &&
+	    ext_feature_isset(ext_features, len,
+			      NL80211_EXT_FEATURE_ACCEPT_BCAST_PROBE_RESP) &&
+	    ext_feature_isset(ext_features, len,
+			      NL80211_EXT_FEATURE_OCE_PROBE_REQ_HIGH_TX_RATE) &&
+	    ext_feature_isset(
+		    ext_features, len,
+		    NL80211_EXT_FEATURE_OCE_PROBE_REQ_DEFERRAL_SUPPRESSION))
+		capa->flags |= WPA_DRIVER_FLAGS_OCE_STA;
+#endif /* CONFIG_MBO */
 }
 
 
@@ -1219,7 +1232,8 @@ int wpa_driver_nl80211_capa(struct wpa_driver_nl80211_data *drv)
 		drv->capa.flags &= ~WPA_DRIVER_FLAGS_EAPOL_TX_STATUS;
 
 #ifdef CONFIG_DRIVER_NL80211_QCA
-	qca_nl80211_check_dfs_capa(drv);
+	if (!(info.capa->flags & WPA_DRIVER_FLAGS_DFS_OFFLOAD))
+		qca_nl80211_check_dfs_capa(drv);
 	qca_nl80211_get_features(drv);
 	qca_nl80211_check_he_capab(drv);
 

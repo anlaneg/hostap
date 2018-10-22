@@ -712,6 +712,41 @@ void ieee802_1x_encapsulate_radius(struct hostapd_data *hapd,
 				goto fail;
 			}
 		}
+
+		if (sta->roaming_consortium &&
+		    !radius_msg_add_wfa(
+			    msg, RADIUS_VENDOR_ATTR_WFA_HS20_ROAMING_CONSORTIUM,
+			    wpabuf_head(sta->roaming_consortium),
+			    wpabuf_len(sta->roaming_consortium))) {
+			wpa_printf(MSG_ERROR,
+				   "Could not add HS 2.0 Roaming Consortium");
+			goto fail;
+		}
+
+		if (hapd->conf->t_c_filename) {
+			be32 timestamp;
+
+			if (!radius_msg_add_wfa(
+				    msg,
+				    RADIUS_VENDOR_ATTR_WFA_HS20_T_C_FILENAME,
+				    (const u8 *) hapd->conf->t_c_filename,
+				    os_strlen(hapd->conf->t_c_filename))) {
+				wpa_printf(MSG_ERROR,
+					   "Could not add HS 2.0 T&C Filename");
+				goto fail;
+			}
+
+			timestamp = host_to_be32(hapd->conf->t_c_timestamp);
+			if (!radius_msg_add_wfa(
+				    msg,
+				    RADIUS_VENDOR_ATTR_WFA_HS20_TIMESTAMP,
+				    (const u8 *) &timestamp,
+				    sizeof(timestamp))) {
+				wpa_printf(MSG_ERROR,
+					   "Could not add HS 2.0 Timestamp");
+				goto fail;
+			}
+		}
 	}
 #endif /* CONFIG_HS20 */
 
@@ -1587,6 +1622,33 @@ static void ieee802_1x_hs20_session_info(struct hostapd_data *hapd,
 	ap_sta_session_warning_timeout(hapd, sta, warning_time);
 }
 
+
+static void ieee802_1x_hs20_t_c_filtering(struct hostapd_data *hapd,
+					  struct sta_info *sta, u8 *pos,
+					  size_t len)
+{
+	if (len < 4)
+		return; /* Malformed information */
+	wpa_printf(MSG_DEBUG,
+		   "HS 2.0: Terms and Conditions filtering %02x %02x %02x %02x",
+		   pos[0], pos[1], pos[2], pos[3]);
+	hs20_t_c_filtering(hapd, sta, pos[0] & BIT(0));
+}
+
+
+static void ieee802_1x_hs20_t_c_url(struct hostapd_data *hapd,
+				    struct sta_info *sta, u8 *pos, size_t len)
+{
+	os_free(sta->t_c_url);
+	sta->t_c_url = os_malloc(len + 1);
+	if (!sta->t_c_url)
+		return;
+	os_memcpy(sta->t_c_url, pos, len);
+	sta->t_c_url[len] = '\0';
+	wpa_printf(MSG_DEBUG,
+		   "HS 2.0: Terms and Conditions URL %s", sta->t_c_url);
+}
+
 #endif /* CONFIG_HS20 */
 
 
@@ -1633,6 +1695,12 @@ static void ieee802_1x_check_hs20(struct hostapd_data *hapd,
 		case RADIUS_VENDOR_ATTR_WFA_HS20_SESSION_INFO_URL:
 			ieee802_1x_hs20_session_info(hapd, sta, pos, sublen,
 						     session_timeout);
+			break;
+		case RADIUS_VENDOR_ATTR_WFA_HS20_T_C_FILTERING:
+			ieee802_1x_hs20_t_c_filtering(hapd, sta, pos, sublen);
+			break;
+		case RADIUS_VENDOR_ATTR_WFA_HS20_T_C_URL:
+			ieee802_1x_hs20_t_c_url(hapd, sta, pos, sublen);
 			break;
 		}
 	}
@@ -2092,6 +2160,13 @@ static int ieee802_1x_get_eap_user(void *ctx, const u8 *identity,
 			goto out;
 		user->password_len = eap_user->password_len;
 		user->password_hash = eap_user->password_hash;
+		if (eap_user->salt && eap_user->salt_len) {
+			user->salt = os_memdup(eap_user->salt,
+					       eap_user->salt_len);
+			if (!user->salt)
+				goto out;
+			user->salt_len = eap_user->salt_len;
+		}
 	}
 	user->force_version = eap_user->force_version;
 	user->macacl = eap_user->macacl;
@@ -2704,6 +2779,15 @@ static void ieee802_1x_wnm_notif_send(void *eloop_ctx, void *timeout_ctx)
 		hs20_send_wnm_notification_deauth_req(hapd, sta->addr,
 						      sta->hs20_deauth_req);
 	}
+
+	if (sta->hs20_t_c_filtering) {
+		wpa_printf(MSG_DEBUG, "HS 2.0: Send WNM-Notification to "
+			   MACSTR " to indicate Terms and Conditions filtering",
+			   MAC2STR(sta->addr));
+		hs20_send_wnm_notification_t_c(hapd, sta->addr, sta->t_c_url);
+		os_free(sta->t_c_url);
+		sta->t_c_url = NULL;
+	}
 }
 #endif /* CONFIG_HS20 */
 
@@ -2728,7 +2812,8 @@ static void ieee802_1x_finished(struct hostapd_data *hapd,
 		sta->remediation_method = 1; /* SOAP-XML SPP */
 	}
 
-	if (success && (sta->remediation || sta->hs20_deauth_req)) {
+	if (success && (sta->remediation || sta->hs20_deauth_req ||
+			sta->hs20_t_c_filtering)) {
 		wpa_printf(MSG_DEBUG, "HS 2.0: Schedule WNM-Notification to "
 			   MACSTR " in 100 ms", MAC2STR(sta->addr));
 		eloop_cancel_timeout(ieee802_1x_wnm_notif_send, hapd, sta);
