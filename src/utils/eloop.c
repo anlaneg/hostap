@@ -1213,7 +1213,7 @@ void eloop_run(void)
 				eloop_timeout_handler handler =
 					timeout->handler;
 				//删除定时器
-				eloop_remove_timeout(timeout);、
+				eloop_remove_timeout(timeout);
 				//执行定时器指明的回调
 				handler(eloop_data, user_data);
 			}
