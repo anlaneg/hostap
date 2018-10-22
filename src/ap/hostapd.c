@@ -1452,6 +1452,7 @@ static int setup_interface(struct hostapd_iface *iface)
 		}
 	}
 
+	//继续启动interface
 	return setup_interface2(iface);
 }
 
