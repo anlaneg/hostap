@@ -26,17 +26,17 @@ int eap_server_register_methods(void)
 
 #ifdef EAP_SERVER_IDENTITY
 	if (ret == 0)
-		ret = eap_server_identity_register();
+		ret = eap_server_identity_register();//注册Identity method
 #endif /* EAP_SERVER_IDENTITY */
 
 #ifdef EAP_SERVER_MD5
 	if (ret == 0)
-		ret = eap_server_md5_register();
+		ret = eap_server_md5_register();//注册md5 method
 #endif /* EAP_SERVER_MD5 */
 
 #ifdef EAP_SERVER_TLS
 	if (ret == 0)
-		ret = eap_server_tls_register();
+		ret = eap_server_tls_register();//注册tls method
 #endif /* EAP_SERVER_TLS */
 
 #ifdef EAP_SERVER_UNAUTH_TLS
@@ -53,12 +53,12 @@ int eap_server_register_methods(void)
 
 #ifdef EAP_SERVER_MSCHAPV2
 	if (ret == 0)
-		ret = eap_server_mschapv2_register();
+		ret = eap_server_mschapv2_register();//注册mschapv2 method
 #endif /* EAP_SERVER_MSCHAPV2 */
 
 #ifdef EAP_SERVER_PEAP
 	if (ret == 0)
-		ret = eap_server_peap_register();
+		ret = eap_server_peap_register();//注册peap method
 #endif /* EAP_SERVER_PEAP */
 
 #ifdef EAP_SERVER_TLV
@@ -68,12 +68,12 @@ int eap_server_register_methods(void)
 
 #ifdef EAP_SERVER_GTC
 	if (ret == 0)
-		ret = eap_server_gtc_register();
+		ret = eap_server_gtc_register();//注册gtc method
 #endif /* EAP_SERVER_GTC */
 
 #ifdef EAP_SERVER_TTLS
 	if (ret == 0)
-		ret = eap_server_ttls_register();
+		ret = eap_server_ttls_register();//注册ttls method
 #endif /* EAP_SERVER_TTLS */
 
 #ifdef EAP_SERVER_SIM

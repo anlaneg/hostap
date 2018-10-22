@@ -5499,6 +5499,7 @@ static inline void drv_event_disassoc(void *ctx, const u8 *addr)
 	wpa_supplicant_event(ctx, EVENT_DISASSOC, &event);
 }
 
+//eap报文收取
 static inline void drv_event_eapol_rx(void *ctx, const u8 *src, const u8 *data,
 				      size_t data_len)
 {

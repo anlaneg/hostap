@@ -389,6 +389,7 @@ static void vlan_bridge_name(char *br_name, struct hostapd_data *hapd, int vid)
 	char *tagged_interface = hapd->conf->ssid.vlan_tagged_interface;
 
 	if (hapd->conf->vlan_bridge[0]) {
+		//如果配置有vlan桥，则桥名称需包含vlanid
 		os_snprintf(br_name, IFNAMSIZ, "%s%d",
 			    hapd->conf->vlan_bridge, vid);
 	} else if (tagged_interface) {

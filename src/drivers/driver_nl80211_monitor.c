@@ -352,6 +352,7 @@ int nl80211_create_monitor_interface(struct wpa_driver_nl80211_data *drv)
 		return 0;
 	}
 
+	//接口名称为p2p-开头，则进入
 	if (os_strncmp(drv->first_bss->ifname, "p2p-", 4) == 0) {
 		/*
 		 * P2P interface name is of the format p2p-%s-%d. For monitor
@@ -364,6 +365,7 @@ int nl80211_create_monitor_interface(struct wpa_driver_nl80211_data *drv)
 		int ret;
 
 		/* Non-P2P interface with AP functionality. */
+		//ap功能，构造monitor设备名称
 		ret = os_snprintf(buf, IFNAMSIZ, "mon.%s",
 				  drv->first_bss->ifname);
 		if (ret >= (int) sizeof(buf))
@@ -376,11 +378,13 @@ int nl80211_create_monitor_interface(struct wpa_driver_nl80211_data *drv)
 
 	buf[IFNAMSIZ - 1] = '\0';
 
+	//尝试创建mon设备
 	drv->monitor_ifidx =
 		nl80211_create_iface(drv, buf, NL80211_IFTYPE_MONITOR, NULL,
 				     0, NULL, NULL, 0);
 
 	if (drv->monitor_ifidx == -EOPNOTSUPP) {
+		//后端不支持时进入
 		/*
 		 * This is backward compatibility for a few versions of
 		 * the kernel only that didn't advertise the right

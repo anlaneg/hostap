@@ -188,6 +188,7 @@ struct hostapd_config * hostapd_config_defaults(void)
 		return NULL;
 	}
 
+	//设置默认的bss
 	hostapd_config_defaults_bss(bss);
 
 	conf->num_bss = 1;
@@ -1031,7 +1032,7 @@ static int hostapd_config_check_cw(struct hostapd_config *conf, int queue)
 	return 0;
 }
 
-
+//配置检查
 int hostapd_config_check(struct hostapd_config *conf, int full_config)
 {
 	size_t i;

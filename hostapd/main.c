@@ -119,7 +119,7 @@ static void hostapd_logger_cb(void *ctx, const u8 *addr, unsigned int module,
 	}
 
 #ifndef CONFIG_NATIVE_WINDOWS
-	if ((conf_syslog & module) && level >= conf_syslog_level) {
+	if ((/*检查此module是否开启syslog*/conf_syslog & module) && level >= conf_syslog_level) {
 		int priority;
 		switch (level) {
 		case HOSTAPD_LEVEL_DEBUG_VERBOSE:
@@ -166,13 +166,14 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
 	}
 
 	/* Initialize the driver interface */
+	//mac地址为0时，指定b=NULL
 	if (!(b[0] | b[1] | b[2] | b[3] | b[4] | b[5]))
 		b = NULL;
 
 	os_memset(&params, 0, sizeof(params));
 	for (i = 0; wpa_drivers[i]; i++) {
 		if (wpa_drivers[i] != hapd->driver)
-			continue;
+			continue;//跳过非对应驱动
 
 		//初始化与hapd->driver相等的drivers，如果
 		//其已初始化，则跳过
@@ -212,6 +213,7 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
 	hapd->drv_priv = hapd->driver->hapd_init(hapd, &params);
 	os_free(params.bridge);
 	if (hapd->drv_priv == NULL) {
+		//驱动初始化失败处理
 		wpa_printf(MSG_ERROR, "%s driver initialization failed.",
 			   hapd->driver->name);
 		hapd->driver = NULL;
@@ -311,6 +313,7 @@ static void handle_term(int sig, void *signal_ctx)
 
 #ifndef CONFIG_NATIVE_WINDOWS
 
+//reload指定interface的配置
 static int handle_reload_iface(struct hostapd_iface *iface, void *ctx)
 {
 	if (hostapd_reload_config(iface) < 0) {
@@ -324,11 +327,13 @@ static int handle_reload_iface(struct hostapd_iface *iface, void *ctx)
 /**
  * handle_reload - SIGHUP handler to reload configuration
  */
+//重新加载配置文件
 static void handle_reload(int sig, void *signal_ctx)
 {
 	struct hapd_interfaces *interfaces = signal_ctx;
 	wpa_printf(MSG_DEBUG, "Signal %d received - reloading configuration",
 		   sig);
+	//针对所有interface,执行配置reload
 	hostapd_for_each_interface(interfaces, handle_reload_iface, NULL);
 }
 
@@ -354,6 +359,7 @@ static int hostapd_global_init(struct hapd_interfaces *interfaces,
 		return -1;
 	}
 
+	//eloop 初始化
 	if (eloop_init()) {
 		wpa_printf(MSG_ERROR, "Failed to initialize event loop");
 		return -1;
@@ -363,10 +369,11 @@ static int hostapd_global_init(struct hapd_interfaces *interfaces,
 	random_init(entropy_file);
 
 #ifndef CONFIG_NATIVE_WINDOWS
-	//注册信号SIGHUP,SIGUSR1处理
+	//注册信号SIGHUP(重新加载配置）,SIGUSR1处理
 	eloop_register_signal(SIGHUP, handle_reload, interfaces);
-	eloop_register_signal(SIGUSR1, handle_dump_state, interfaces);
+	eloop_register_signal(SIGUSR1, handle_dump_state/*实现为空*/, interfaces);
 #endif /* CONFIG_NATIVE_WINDOWS */
+	//eloop信号注册（SIGINT,SIGTRM)，当发生时，知会eloop进程需要中止，等待eloop响应
 	eloop_register_signal_terminate(handle_term, interfaces);
 
 #ifndef CONFIG_NATIVE_WINDOWS
@@ -642,12 +649,14 @@ static int hostapd_periodic_call(struct hostapd_iface *iface, void *ctx)
 
 
 /* Periodic cleanup tasks */
+//继续调用eloop_reigster_timeout(实现为周期性定时器）
 static void hostapd_periodic(void *eloop_ctx, void *timeout_ctx)
 {
 	struct hapd_interfaces *interfaces = eloop_ctx;
 
 	eloop_register_timeout(HOSTAPD_CLEANUP_INTERVAL, 0,
 			       hostapd_periodic, interfaces, NULL);
+	//针对每一个interface,调用hostapd_periodic_call
 	hostapd_for_each_interface(interfaces, hostapd_periodic_call, NULL);
 }
 
@@ -676,7 +685,7 @@ int main(int argc, char *argv[])
 
 	os_memset(&interfaces, 0, sizeof(interfaces));
 	interfaces.reload_config = hostapd_reload_config;
-	interfaces.config_read_cb = hostapd_config_read;
+	interfaces.config_read_cb = hostapd_config_read;//负责读取各个接口对应的配置文件
 	interfaces.for_each_interface = hostapd_for_each_interface;
 	interfaces.ctrl_iface_init = hostapd_ctrl_iface_init;
 	interfaces.ctrl_iface_deinit = hostapd_ctrl_iface_deinit;
@@ -771,7 +780,7 @@ int main(int argc, char *argv[])
 			return gen_uuid(optarg);
 #endif /* CONFIG_WPS */
 		case 'i':
-			//解析接口名称，存入if_names数组
+			//解析参数指定的一组接口名称，存入if_names数组（每个接口需要一个配置文件）
 			if (hostapd_get_interface_names(&if_names,
 							&if_names_size, optarg))
 				goto out;
@@ -784,7 +793,7 @@ int main(int argc, char *argv[])
 
 	if (optind == argc && interfaces.global_iface_path == NULL &&
 	    num_bss_configs == 0)
-		usage();//所有参数已完成解析，进行合法性检查
+		usage();//所有参数已完成解析，进行合法性检查，如果不合法显示usage,退出
 
 	wpa_msg_register_ifname_cb(hostapd_msg_ifname_cb);
 
@@ -822,6 +831,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	//注册每HOSTAPD_CLEANUP_INTERVAL，做一次hostapd_periodic
 	eloop_register_timeout(HOSTAPD_CLEANUP_INTERVAL, 0,
 			       hostapd_periodic, &interfaces, NULL);
 
@@ -844,7 +854,7 @@ int main(int argc, char *argv[])
 		if (i < if_names_size)
 			if_name = if_names[i];
 
-		//如果有多个接口，每个接口一个配置文件
+		//如果有多个接口，每个接口一个配置文件(解析配置文件）
 		interfaces.iface[i] = hostapd_interface_init(&interfaces,
 							     if_name,
 							     argv[optind + i],//配置文件路径
@@ -925,6 +935,7 @@ int main(int argc, char *argv[])
 			}
 		}
 #endif /* CONFIG_MBO */
+		//启动接口
 		if (hostapd_setup_interface(interfaces.iface[i]))
 			goto out;
 	}

@@ -51,10 +51,10 @@ struct eloop_sock {
 
 struct eloop_timeout {
 	struct dl_list list;
-	struct os_reltime time;
+	struct os_reltime time;//定时器到期时间
 	void *eloop_data;
-	void *user_data;
-	eloop_timeout_handler handler;
+	void *user_data;//用户参数
+	eloop_timeout_handler handler;//定时器过期回调
 	WPA_TRACE_REF(eloop);
 	WPA_TRACE_REF(user);
 	WPA_TRACE_INFO
@@ -89,7 +89,7 @@ struct eloop_data {
 	struct eloop_sock *fd_table;
 #endif /* CONFIG_ELOOP_EPOLL || CONFIG_ELOOP_KQUEUE */
 #ifdef CONFIG_ELOOP_EPOLL
-	int epollfd;
+	int epollfd;//epoll对应的fd
 	int epoll_max_event_num;
 	struct epoll_event *epoll_events;
 #endif /* CONFIG_ELOOP_EPOLL */
@@ -98,12 +98,12 @@ struct eloop_data {
 	int kqueue_nevents;
 	struct kevent *kqueue_events;
 #endif /* CONFIG_ELOOP_KQUEUE */
-	//读写异常表（保存相应sock)
+	//读，写，异常fd表（保存相应sock)
 	struct eloop_sock_table readers;
 	struct eloop_sock_table writers;
 	struct eloop_sock_table exceptions;
 
-	struct dl_list timeout;//定时器链表
+	struct dl_list timeout;//定时器链表（挂载的结构体为struct eloop_timeout）
 
 	int signal_count;//信号处理数组大小
 	struct eloop_signal *signals;//信号处理数组
@@ -164,6 +164,7 @@ int eloop_init(void)
 	os_memset(&eloop, 0, sizeof(eloop));
 	dl_list_init(&eloop.timeout);
 #ifdef CONFIG_ELOOP_EPOLL
+	//创建epoll对应的fd
 	eloop.epollfd = epoll_create1(0);
 	if (eloop.epollfd < 0) {
 		wpa_printf(MSG_ERROR, "%s: epoll_create1 failed. %s",
@@ -711,7 +712,7 @@ static void eloop_sock_table_destroy(struct eloop_sock_table *table)
 	}
 }
 
-
+//为eloop注册读回调
 int eloop_register_read_sock(int sock, eloop_sock_handler handler,
 			     void *eloop_data, void *user_data)
 {
@@ -765,7 +766,7 @@ void eloop_unregister_sock(int sock, eloop_event_type type)
 
 //定时器注册
 int eloop_register_timeout(unsigned int secs, unsigned int usecs,
-			   eloop_timeout_handler handler,
+			   eloop_timeout_handler handler/*定时器过期回调*/,
 			   void *eloop_data, void *user_data)
 {
 	struct eloop_timeout *timeout, *tmp;
@@ -774,7 +775,8 @@ int eloop_register_timeout(unsigned int secs, unsigned int usecs,
 	timeout = os_zalloc(sizeof(*timeout));
 	if (timeout == NULL)
 		return -1;
-	//定时器过期时间填充
+
+	//定时器过期时间填充（1。先取当前系统时间；2。再加上过期间隔）
 	if (os_get_reltime(&timeout->time) < 0) {
 		os_free(timeout);
 		return -1;
@@ -782,7 +784,7 @@ int eloop_register_timeout(unsigned int secs, unsigned int usecs,
 	now_sec = timeout->time.sec;
 	timeout->time.sec += secs;
 	if (timeout->time.sec < now_sec) {
-		//定时器时间越界
+		//过期时间过长，导致定时器时间越界
 		/*
 		 * Integer overflow - assume long enough timeout to be assumed
 		 * to be infinite, i.e., the timeout would never happen.
@@ -829,13 +831,14 @@ static void eloop_remove_timeout(struct eloop_timeout *timeout)
 	os_free(timeout);
 }
 
-
+//定时器取消（容许取消多个）
 int eloop_cancel_timeout(eloop_timeout_handler handler,
 			 void *eloop_data, void *user_data)
 {
 	struct eloop_timeout *timeout, *prev;
 	int removed = 0;
 
+	//遍历timeout链表，将满条件的time,删除掉
 	dl_list_for_each_safe(timeout, prev, &eloop.timeout,
 			      struct eloop_timeout, list) {
 		if (timeout->handler == handler &&
@@ -852,9 +855,10 @@ int eloop_cancel_timeout(eloop_timeout_handler handler,
 }
 
 
+//定时器删除（仅删除一个）
 int eloop_cancel_timeout_one(eloop_timeout_handler handler,
 			     void *eloop_data, void *user_data,
-			     struct os_reltime *remaining)
+			     struct os_reltime *remaining/*出参，还有多久被删除的定时器触发*/)
 {
 	struct eloop_timeout *timeout, *prev;
 	int removed = 0;
@@ -869,8 +873,10 @@ int eloop_cancel_timeout_one(eloop_timeout_handler handler,
 		    (timeout->eloop_data == eloop_data) &&
 		    (timeout->user_data == user_data)) {
 			removed = 1;
+			//计算还有多久此定时器触发
 			if (os_reltime_before(&now, &timeout->time))
 				os_reltime_sub(&timeout->time, &now, remaining);
+			//将定时器删除
 			eloop_remove_timeout(timeout);
 			break;
 		}
@@ -878,7 +884,7 @@ int eloop_cancel_timeout_one(eloop_timeout_handler handler,
 	return removed;
 }
 
-
+//检查指定定时器是否已注册
 int eloop_is_timeout_registered(eloop_timeout_handler handler,
 				void *eloop_data, void *user_data)
 {
@@ -910,9 +916,11 @@ int eloop_deplete_timeout(unsigned int req_secs, unsigned int req_usecs,
 			requested.usec = req_usecs;
 			os_get_reltime(&now);
 			os_reltime_sub(&tmp->time, &now, &remaining);
+			//如果过期时间大于requested,则将所有此类定时器删除
 			if (os_reltime_before(&requested, &remaining)) {
 				eloop_cancel_timeout(handler, eloop_data,
 						     user_data);
+				//重新注册新的过期定时器
 				eloop_register_timeout(requested.sec,
 						       requested.usec,
 						       handler, eloop_data,
@@ -996,11 +1004,12 @@ static void eloop_handle_signal(int sig)
 	}
 }
 
-
+//信号处理（触发信号回调）
 static void eloop_process_pending_signals(void)
 {
 	int i;
 
+	//无信号触发，直接返回
 	if (eloop.signaled == 0)
 		return;
 	eloop.signaled = 0;
@@ -1012,6 +1021,7 @@ static void eloop_process_pending_signals(void)
 		eloop.pending_terminate = 0;
 	}
 
+	//如果有过触发，则调用1次
 	for (i = 0; i < eloop.signal_count; i++) {
 		if (eloop.signals[i].signaled) {
 			eloop.signals[i].signaled = 0;
@@ -1068,6 +1078,8 @@ int eloop_register_signal_reconfig(eloop_signal_handler handler,
 }
 
 //进入事件循环
+//通过select,epoll等获得fd事件。
+//先处理信号回调，再处理定时器回调，最后按读，写，异常处理fd回调
 void eloop_run(void)
 {
 #ifdef CONFIG_ELOOP_POLL
@@ -1095,7 +1107,7 @@ void eloop_run(void)
 		goto out;
 #endif /* CONFIG_ELOOP_SELECT */
 
-	//如果eloop不中五，且定时器链表不为空，且有fd事件需要处理，则进行入
+	//如果eloop不中断，且定时器链表不为空，且有fd事件需要处理，则进行入
 	while (!eloop.terminate &&
 	       (!dl_list_empty(&eloop.timeout) || eloop.readers.count > 0 ||
 		eloop.writers.count > 0 || eloop.exceptions.count > 0)) {
@@ -1197,6 +1209,7 @@ void eloop_run(void)
 		eloop.writers.changed = 0;
 		eloop.exceptions.changed = 0;
 
+		//信号处理
 		eloop_process_pending_signals();
 
 
@@ -1223,7 +1236,7 @@ void eloop_run(void)
 		if (res <= 0)
 			continue;
 
-		//上层修改了readers,writers,exceptions表
+		//在处理信号，定时器过程中，上层修改了readers,writers,exceptions表，重新监测
 		//见注释说明
 		if (eloop.readers.changed ||
 		    eloop.writers.changed ||
@@ -1267,7 +1280,7 @@ out:
 	return;
 }
 
-
+//指明进程需要terminate,等待eloop响应
 void eloop_terminate(void)
 {
 	eloop.terminate = 1;

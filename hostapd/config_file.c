@@ -2337,20 +2337,23 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 			       const char *buf, char *pos, int line)
 {
 	if (os_strcmp(buf, "interface") == 0) {
-		//由于是同一个interface，故总是设置首个bss
+		//设置接口名称，由于是同一个interface，故总是设置首个bss
 		os_strlcpy(conf->bss[0]->iface, pos,
 			   sizeof(conf->bss[0]->iface));
 	} else if (os_strcmp(buf, "bridge") == 0) {
 		//设置配置的桥
 		os_strlcpy(bss->bridge, pos, sizeof(bss->bridge));
 	} else if (os_strcmp(buf, "vlan_bridge") == 0) {
+		//设置vlan桥(支持vlan转发）
 		os_strlcpy(bss->vlan_bridge, pos, sizeof(bss->vlan_bridge));
 	} else if (os_strcmp(buf, "wds_bridge") == 0) {
+		//设置wds桥
 		os_strlcpy(bss->wds_bridge, pos, sizeof(bss->wds_bridge));
 	} else if (os_strcmp(buf, "driver") == 0) {
+		//设置驱动
 		int j;
 		const struct wpa_driver_ops *driver = NULL;
-		//查找配置的驱动
+		//通过配置的名称，查找配置的驱动
 		for (j = 0; wpa_drivers[j]; j++) {
 			if (os_strcmp(pos, wpa_drivers[j]->name) == 0) {
 				driver = wpa_drivers[j];
@@ -2366,6 +2369,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		}
 		conf->driver = driver;
 	} else if (os_strcmp(buf, "driver_params") == 0) {
+		//设置驱动参数
 		os_free(conf->driver_params);
 		conf->driver_params = os_strdup(pos);
 	} else if (os_strcmp(buf, "debug") == 0) {
@@ -2373,20 +2377,27 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		wpa_printf(MSG_DEBUG, "Line %d: DEPRECATED: 'debug' configuration variable is not used anymore",
 			   line);
 	} else if (os_strcmp(buf, "logger_syslog_level") == 0) {
+		//syslog级别
 		bss->logger_syslog_level = atoi(pos);
 	} else if (os_strcmp(buf, "logger_stdout_level") == 0) {
+		//stdout log级别
 		bss->logger_stdout_level = atoi(pos);
 	} else if (os_strcmp(buf, "logger_syslog") == 0) {
+		//设置开启syslog的module
 		bss->logger_syslog = atoi(pos);
 	} else if (os_strcmp(buf, "logger_stdout") == 0) {
+		//设置开启stdout输出的module
 		bss->logger_stdout = atoi(pos);
 	} else if (os_strcmp(buf, "dump_file") == 0) {
+		//dump_file参数将被忽略
 		wpa_printf(MSG_INFO, "Line %d: DEPRECATED: 'dump_file' configuration variable is not used anymore",
 			   line);
 	} else if (os_strcmp(buf, "ssid") == 0) {
+		//设置ssid
 		bss->ssid.ssid_len = os_strlen(pos);
 		if (bss->ssid.ssid_len > SSID_MAX_LEN ||
 		    bss->ssid.ssid_len < 1) {
+			//ssid长度不能超过SSID_MAX_LEN
 			wpa_printf(MSG_ERROR, "Line %d: invalid SSID '%s'",
 				   line, pos);
 			return 1;
@@ -4155,6 +4166,7 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 		return NULL;
 	}
 
+	//加载默认配置
 	conf = hostapd_config_defaults();
 	if (conf == NULL) {
 		fclose(f);
@@ -4162,7 +4174,7 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 	}
 
 	/* set default driver based on configuration */
-	conf->driver = wpa_drivers[0];//默认驱动为wpa_drivers[0],即nl80211
+	conf->driver = wpa_drivers[0];//设置默认驱动为wpa_drivers[0],依据不同宏，会对应到不同driver,例如nl80211
 	if (conf->driver == NULL) {
 		//wap_drivers数组为空，报错
 		wpa_printf(MSG_ERROR, "No driver wrappers registered!");
@@ -4182,6 +4194,7 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 
 		if (buf[0] == '#')
 			continue;//跳过注释行
+
 		pos = buf;
 		//将本行的'\n'改为'\0'，忽略'\n'后面的内容
 		while (*pos != '\0') {
@@ -4191,6 +4204,7 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 			}
 			pos++;
 		}
+
 		//忽略空行
 		if (buf[0] == '\0')
 			continue;
@@ -4201,12 +4215,12 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 			wpa_printf(MSG_ERROR, "Line %d: invalid line '%s'",
 				   line, buf);
 			errors++;
-			continue;
+			continue;//忽略非key,value行
 		}
-		*pos = '\0';
+		*pos = '\0';//将key，value独立为字符串
 		pos++;
-		//此时buf为key,pos为value,line为行号
-		errors += hostapd_config_fill(conf, bss, buf, pos, line);
+		//此时buf为key,pos为value,line为行号,解析配置文件并填充
+		errors += hostapd_config_fill(conf, bss, buf/*传入key*/, pos/*传入value*/, line/*配置文件所在行号*/);
 	}
 
 	fclose(f);
@@ -4219,6 +4233,7 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 
 #ifndef WPA_IGNORE_CONFIG_ERRORS
 	if (errors) {
+		//配置文件有错误，返回NULL
 		wpa_printf(MSG_ERROR, "%d errors found in configuration file "
 			   "'%s'", errors, fname);
 		hostapd_config_free(conf);

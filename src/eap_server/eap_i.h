@@ -74,7 +74,7 @@ struct eap_method {
 	 * This variable is used internally in the EAP method registration code
 	 * to create a linked list of registered EAP methods.
 	 */
-	struct eap_method *next;
+	struct eap_method *next;//指向下一个EAP method
 
 	/**
 	 * get_emsk - Get EAP method specific keying extended material (EMSK)

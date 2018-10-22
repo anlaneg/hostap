@@ -342,7 +342,7 @@ static void random_read_entropy(void)
 	size_t len;
 
 	if (!random_entropy_file)
-		return;
+		return;//如果未设置entropy文件，则直接返回
 
 	buf = os_readfile(random_entropy_file, &len);
 	if (buf == NULL)
@@ -412,7 +412,7 @@ void random_init(const char *entropy_file)
 
 #ifdef __linux__
 	if (random_fd >= 0)
-		return;
+		return;//如果random_fd已初始化，则返回
 
 	random_fd = open("/dev/random", O_RDONLY | O_NONBLOCK);
 	if (random_fd < 0) {

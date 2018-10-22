@@ -60,15 +60,15 @@ struct i802_bss {
 	char ifname[IFNAMSIZ + 1];
 	char brname[IFNAMSIZ];//桥名称
 	unsigned int beacon_set:1;
-	unsigned int added_if_into_bridge:1;
-	unsigned int already_in_bridge:1;
-	unsigned int added_bridge:1;
+	unsigned int added_if_into_bridge:1;//添加接口进桥标记
+	unsigned int already_in_bridge:1;//接口已被添加进桥的标记
+	unsigned int added_bridge:1;//桥已添加标记
 	unsigned int in_deinit:1;
 	unsigned int wdev_id_set:1;
 	unsigned int added_if:1;
 	unsigned int static_ap:1;
 
-	u8 addr[ETH_ALEN];
+	u8 addr[ETH_ALEN];//接口的mac地址
 
 	int freq;
 	int bandwidth;

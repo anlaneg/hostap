@@ -252,13 +252,15 @@ struct sae_password_entry {
 struct hostapd_bss_config {
 	char iface[IFNAMSIZ + 1];//接口名称
 	char bridge[IFNAMSIZ + 1];//桥名称
-	char vlan_bridge[IFNAMSIZ + 1];
+	char vlan_bridge[IFNAMSIZ + 1];//vlan桥名称（支持vlan转发）
 	char wds_bridge[IFNAMSIZ + 1];
 
 	//日志级别（0时最详细的）
-	enum hostapd_logger_level logger_syslog_level, logger_stdout_level;
+	enum hostapd_logger_level logger_syslog_level/*syslog级别*/, logger_stdout_level;
 
+	//开启syslog的module(每个bit位表示一个module)
 	unsigned int logger_syslog; /* module bitfield */
+	//开启stdout的module
 	unsigned int logger_stdout; /* module bitfield */
 
 	int max_num_sta; /* maximum number of STAs in station table */
@@ -733,7 +735,7 @@ struct hostapd_config {
 	enum beacon_rate_type rate_type;
 
 	//配置文件指定驱动名，在wpa_drivers数组中查找到的驱动
-	const struct wpa_driver_ops *driver;
+	const struct wpa_driver_ops *driver;//接口使用的驱动
 	//为驱动指定的参数（配置文件给出）
 	char *driver_params;
 

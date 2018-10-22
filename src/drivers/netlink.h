@@ -14,8 +14,10 @@ struct ifinfomsg;
 
 struct netlink_config {
 	void *ctx;
+	//kernel新建link事件回调
 	void (*newlink_cb)(void *ctx, struct ifinfomsg *ifi, u8 *buf,
 			   size_t len);
+	//kernel删除link事件回调
 	void (*dellink_cb)(void *ctx, struct ifinfomsg *ifi, u8 *buf,
 			   size_t len);
 };

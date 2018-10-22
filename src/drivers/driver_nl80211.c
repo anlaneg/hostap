@@ -2014,7 +2014,7 @@ static void * wpa_driver_nl80211_init(void *ctx, const char *ifname,
 					   NULL);
 }
 
-
+//注册数据帧
 static int nl80211_register_frame(struct i802_bss *bss,
 				  struct nl_handle *nl_handle,
 				  u16 type, const u8 *match, size_t match_len)
@@ -2084,6 +2084,7 @@ static int nl80211_register_action_frame(struct i802_bss *bss,
 static int nl80211_init_connect_handle(struct i802_bss *bss)
 {
 	if (bss->nl_connect) {
+		//如果已连接，则报错
 		wpa_printf(MSG_DEBUG,
 			   "nl80211: Connect handle already created (nl_connect=%p)",
 			   bss->nl_connect);
@@ -2095,7 +2096,7 @@ static int nl80211_init_connect_handle(struct i802_bss *bss)
 		return -1;
 	nl80211_register_eloop_read(&bss->nl_connect,
 				    wpa_driver_nl80211_event_receive,
-				    bss->nl_cb, 1);
+				    bss->nl_cb/*消息处理交给bss->nl_cb*/, 1);
 	return 0;
 }
 
@@ -2445,7 +2446,7 @@ static int nl80211_set_p2pdev(struct i802_bss *bss, int start)
 	return ret;
 }
 
-
+//设置接口up/down
 static int i802_set_iface_flags(struct i802_bss *bss, int up)
 {
 	enum nl80211_iftype nlmode;
@@ -2517,14 +2518,14 @@ static void qca_vendor_test(struct wpa_driver_nl80211_data *drv)
 
 static int
 wpa_driver_nl80211_finish_drv_init(struct wpa_driver_nl80211_data *drv,
-				   const u8 *set_addr, int first,
+				   const u8 *set_addr/*接口要被设置的mac地址*/, int first,
 				   const char *driver_params)
 {
 	struct i802_bss *bss = drv->first_bss;
 	int send_rfkill_event = 0;
 	enum nl80211_iftype nlmode;
 
-	drv->ifindex = if_nametoindex(bss->ifname);
+	drv->ifindex = if_nametoindex(bss->ifname);//通过接口名称取ifindex
 	bss->ifindex = drv->ifindex;
 	bss->wdev_id = drv->global->if_add_wdevid;
 	bss->wdev_id_set = drv->global->if_add_wdevid_set;
@@ -2578,6 +2579,7 @@ wpa_driver_nl80211_finish_drv_init(struct wpa_driver_nl80211_data *drv,
 	wpa_driver_nl80211_drv_init_rfkill(drv);
 
 	if (!rfkill_is_blocked(drv->rfkill)) {
+		//设置接口up
 		int ret = i802_set_iface_flags(bss, 1);
 		if (ret) {
 			wpa_printf(MSG_ERROR, "nl80211: Could not set "
@@ -2604,6 +2606,7 @@ wpa_driver_nl80211_finish_drv_init(struct wpa_driver_nl80211_data *drv,
 		netlink_send_oper_ifla(drv->global->netlink, drv->ifindex,
 				       1, IF_OPER_DORMANT);
 
+	//获取接口的mac地址
 	if (nlmode != NL80211_IFTYPE_P2P_DEVICE) {
 		if (linux_get_ifhwaddr(drv->global->ioctl_sock, bss->ifname,
 				       bss->addr))
@@ -4874,7 +4877,7 @@ static int nl80211_setup_ap(struct i802_bss *bss)
 
 	if (!drv->device_ap_sme && drv->use_monitor &&
 	    nl80211_create_monitor_interface(drv) &&
-	    !drv->device_ap_sme)
+	    !drv->device_ap_sme/*如果创建monitor失败，则此值为1*/)
 		return -1;
 
 	if (drv->device_ap_sme &&
@@ -5764,6 +5767,7 @@ static int wpa_driver_nl80211_set_mode_impl(
 	if (TEST_FAIL())
 		return -1;
 
+	//设置接口模式
 	mode_switch_res = nl80211_set_mode(drv, drv->ifindex, nlmode);
 	if (mode_switch_res && nlmode == nl80211_get_ifmode(bss))
 		mode_switch_res = 0;
@@ -5814,6 +5818,7 @@ static int wpa_driver_nl80211_set_mode_impl(
 		}
 
 		/* Try to set the mode again while the interface is down */
+		//设置接口的模式，例如AP模式
 		mode_switch_res = nl80211_set_mode(drv, drv->ifindex, nlmode);
 		if (mode_switch_res == -EBUSY) {
 			wpa_printf(MSG_DEBUG,
@@ -5859,6 +5864,7 @@ done:
 		nl80211_disable_11b_rates(drv, drv->ifindex, 0);
 	}
 
+	//当前是ap接口
 	if (is_ap_interface(nlmode)) {
 		nl80211_mgmt_unsubscribe(bss, "start AP");
 		/* Setup additional AP mode functionality if needed */
@@ -6639,7 +6645,7 @@ static int i802_set_wds_sta(void *priv, const u8 *addr, int aid, int val,
 	}
 }
 
-
+//pae报文回调处理
 static void handle_eapol(int sock, void *eloop_ctx, void *sock_ctx)
 {
 	struct wpa_driver_nl80211_data *drv = eloop_ctx;
@@ -6648,6 +6654,7 @@ static void handle_eapol(int sock, void *eloop_ctx, void *sock_ctx)
 	int len;
 	socklen_t fromlen = sizeof(lladdr);
 
+	//收取报文
 	len = recvfrom(sock, buf, sizeof(buf), 0,
 		       (struct sockaddr *)&lladdr, &fromlen);
 	if (len < 0) {
@@ -6675,6 +6682,7 @@ static int i802_check_bridge(struct wpa_driver_nl80211_data *drv,
 		 * Bridge was configured, but the bridge device does
 		 * not exist. Try to add it now.
 		 */
+		//如果桥不存在，则创建桥
 		if (linux_br_add(drv->global->ioctl_sock, brname) < 0) {
 			wpa_printf(MSG_ERROR, "nl80211: Failed to add the "
 				   "bridge interface %s: %s",
@@ -6687,14 +6695,17 @@ static int i802_check_bridge(struct wpa_driver_nl80211_data *drv,
 	}
 	bss->br_ifindex = br_ifindex;
 
+	//获取ifname对应的桥名称（in_br)
 	if (linux_br_get(in_br, ifname) == 0) {
 		if (os_strcmp(in_br, brname) == 0) {
+			//如果ifname已在桥中，则直接返回
 			bss->already_in_bridge = 1;
 			return 0; /* already in the bridge */
 		}
 
 		wpa_printf(MSG_DEBUG, "nl80211: Removing interface %s from "
 			   "bridge %s", ifname, in_br);
+		//否则ifname在一个错误的桥里，需要自旧的桥中移除
 		if (linux_br_del_if(drv->global->ioctl_sock, in_br, ifname) <
 		    0) {
 			wpa_printf(MSG_ERROR, "nl80211: Failed to "
@@ -6707,6 +6718,7 @@ static int i802_check_bridge(struct wpa_driver_nl80211_data *drv,
 
 	wpa_printf(MSG_DEBUG, "nl80211: Adding interface %s into bridge %s",
 		   ifname, brname);
+	//将ifname添加进桥中
 	if (linux_br_add_if(drv->global->ioctl_sock, brname, ifname) < 0) {
 		wpa_printf(MSG_ERROR, "nl80211: Failed to add interface %s "
 			   "into bridge %s: %s",
@@ -6731,21 +6743,21 @@ static void *i802_init(struct hostapd_data *hapd,
 
 	bss = wpa_driver_nl80211_drv_init(hapd, params->ifname,
 					  params->global_priv, 1,
-					  params->bssid, params->driver_params);
+					  params->bssid/*设备的mac地址*/, params->driver_params);
 	if (bss == NULL)
 		return NULL;
 
 	drv = bss->drv;
 
 	if (linux_br_get(master_ifname, params->ifname) == 0) {
-		//ifname被绑定在bridge上时
+		//ifname已被绑定在bridge上时
 		wpa_printf(MSG_DEBUG, "nl80211: Interface %s is in bridge %s",
 			   params->ifname, master_ifname);
 		br_ifindex = if_nametoindex(master_ifname);//取桥设备的ifindex
 		os_strlcpy(bss->brname, master_ifname, IFNAMSIZ);//设置桥名称
 	} else if ((params->num_bridge == 0 || !params->bridge[0]) &&
 		   linux_master_get(master_ifname, params->ifname) == 0) {
-		//ifname是某个接口的成员
+		//没有配置桥时，且ifname是某个接口的成员时
 		wpa_printf(MSG_DEBUG, "nl80211: Interface %s is in master %s",
 			params->ifname, master_ifname);
 		/* start listening for EAPOL on the master interface */
@@ -6766,8 +6778,10 @@ static void *i802_init(struct hostapd_data *hapd,
 
 	bss->br_ifindex = br_ifindex;
 
+	//获取配置的桥的ifindex
 	for (i = 0; i < params->num_bridge; i++) {
 		if (params->bridge[i]) {
+			//取桥对应的ifindex
 			ifindex = if_nametoindex(params->bridge[i]);
 			if (ifindex)
 				add_ifidx(drv, ifindex, drv->ifindex);
@@ -6779,10 +6793,12 @@ static void *i802_init(struct hostapd_data *hapd,
 	/* start listening for EAPOL on the default AP interface */
 	add_ifidx(drv, drv->ifindex, IFIDX_ANY);
 
+	//如果配置了桥，将ifname添加进桥，如果桥不存在，则创建桥再加入
 	if (params->num_bridge && params->bridge[0]) {
 		if (i802_check_bridge(drv, bss, params->bridge[0],
 				      params->ifname) < 0)
 			goto failed;
+		//如果两者不相同，则桥已添加
 		if (os_strcmp(params->bridge[0], master_ifname) != 0)
 			br_added = 1;
 	}
@@ -6793,6 +6809,7 @@ static void *i802_init(struct hostapd_data *hapd,
 
 #ifdef CONFIG_LIBNL3_ROUTE
 	if (bss->added_if_into_bridge || bss->already_in_bridge) {
+		//如果接口已添加进桥，则初始化route
 		drv->rtnl_sk = nl_socket_alloc();
 		if (drv->rtnl_sk == NULL) {
 			wpa_printf(MSG_ERROR, "nl80211: Failed to allocate nl_sock");
@@ -6807,6 +6824,7 @@ static void *i802_init(struct hostapd_data *hapd,
 	}
 #endif /* CONFIG_LIBNL3_ROUTE */
 
+	//创建raw socket,收取ETH_P_PAE报文
 	drv->eapol_sock = socket(PF_PACKET, SOCK_DGRAM, htons(ETH_P_PAE));
 	if (drv->eapol_sock < 0) {
 		wpa_printf(MSG_ERROR, "nl80211: socket(PF_PACKET, SOCK_DGRAM, ETH_P_PAE) failed: %s",
@@ -6814,6 +6832,7 @@ static void *i802_init(struct hostapd_data *hapd,
 		goto failed;
 	}
 
+	//注册pae标记处理回调
 	if (eloop_register_read_sock(drv->eapol_sock, handle_eapol, drv, NULL))
 	{
 		wpa_printf(MSG_INFO, "nl80211: Could not register read socket for eapol");
@@ -7446,7 +7465,7 @@ static int wpa_driver_nl80211_probe_req_report(struct i802_bss *bss, int report)
 
 	nl80211_register_eloop_read(&bss->nl_preq,
 				    wpa_driver_nl80211_event_receive,
-				    bss->nl_cb, 0);
+				    bss->nl_cb/*处理驱动事件*/, 0);
 
 	return 0;
 
@@ -7699,7 +7718,7 @@ static int nl80211_set_param(void *priv, const char *param)
 	return 0;
 }
 
-
+//nl80211驱动初始化
 static void * nl80211_global_init(void *ctx)
 {
 	struct nl80211_global *global;
@@ -7720,7 +7739,7 @@ static void * nl80211_global_init(void *ctx)
 	cfg->ctx = global;
 	cfg->newlink_cb = wpa_driver_nl80211_event_rtm_newlink;
 	cfg->dellink_cb = wpa_driver_nl80211_event_rtm_dellink;
-	global->netlink = netlink_init(cfg);
+	global->netlink = netlink_init(cfg);//注册netlink回调，处理newlink,dellink事件
 	if (global->netlink == NULL) {
 		os_free(cfg);
 		goto err;

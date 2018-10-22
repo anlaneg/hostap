@@ -42,7 +42,7 @@ int os_get_time(struct os_time *t)
 	return res;
 }
 
-
+//取当前系统时间
 int os_get_reltime(struct os_reltime *t)
 {
 	int res;
@@ -94,7 +94,7 @@ int os_gmtime(os_time_t t, struct os_tm *tm)
 	return 0;
 }
 
-
+//制作daemon
 int os_daemonize(const char *pid_file)
 {
 	if (daemon(0, 0)) {
@@ -150,25 +150,32 @@ char * os_rel2abs_path(const char *rel_path)
 	char *buf = NULL, *cwd, *ret;
 	size_t len = 128, cwd_len, rel_len, ret_len;
 
+	//如果path是绝对路径，则直接copy
 	if (rel_path[0] == '/')
 		return os_strdup(rel_path);
 
+	//此时为相对路径
+
+	//1.取当前工作路径地址，存入到buf
 	for (;;) {
 		buf = os_malloc(len);
 		if (buf == NULL)
 			return NULL;
+		//取当前路径
 		cwd = getcwd(buf, len);
 		if (cwd == NULL) {
 			os_free(buf);
 			if (errno != ERANGE) {
 				return NULL;
 			}
+			//错误码为ERANGE,表示当前buffer长度不足以存放路径，增加buffer长度
 			len *= 2;
 		} else {
 			break;
 		}
 	}
 
+	//将当前工作目录与rel_path连接起来
 	cwd_len = os_strlen(cwd);
 	rel_len = os_strlen(rel_path);
 	ret_len = cwd_len + 1 + rel_len + 1;

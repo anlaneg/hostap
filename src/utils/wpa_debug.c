@@ -600,7 +600,7 @@ void wpa_debug_close_file(void)
 #endif /* CONFIG_DEBUG_FILE */
 }
 
-
+//将stdout设置为禁止缓冲
 void wpa_debug_setup_stdout(void)
 {
 #ifndef _WIN32
@@ -815,7 +815,7 @@ void hostapd_logger_register_cb(hostapd_logger_cb_func func)
 }
 
 //格式化字符串，并释放掉内存
-void hostapd_logger(void *ctx, const u8 *addr, unsigned int module, int level,
+void hostapd_logger(void *ctx, const u8 *addr, unsigned int module/*指明日志产生的模块*/, int level,
 		    const char *fmt, ...)
 {
 	va_list ap;
@@ -839,7 +839,7 @@ void hostapd_logger(void *ctx, const u8 *addr, unsigned int module, int level,
 	va_start(ap, fmt);
 	len = vsnprintf(buf, buflen, fmt, ap);
 	va_end(ap);
-	//日志logger回调
+	//如果有日志logger回调，则调用
 	if (hostapd_logger_cb)
 		hostapd_logger_cb(ctx, addr, module, level, buf, len);
 	else if (addr)

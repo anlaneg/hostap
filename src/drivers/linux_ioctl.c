@@ -14,7 +14,7 @@
 #include "utils/common.h"
 #include "linux_ioctl.h"
 
-
+//设置接口up或者down
 int linux_set_iface_flags(int sock, const char *ifname, int dev_up)
 {
 	struct ifreq ifr;
@@ -33,6 +33,7 @@ int linux_set_iface_flags(int sock, const char *ifname, int dev_up)
 		return ret;
 	}
 
+	//如果dev_up,则添加up标记，否则添加down标记
 	if (dev_up) {
 		if (ifr.ifr_flags & IFF_UP)
 			return 0;
@@ -54,7 +55,7 @@ int linux_set_iface_flags(int sock, const char *ifname, int dev_up)
 	return 0;
 }
 
-
+//检查接口ifname是否up
 int linux_iface_up(int sock, const char *ifname)
 {
 	struct ifreq ifr;
@@ -76,7 +77,7 @@ int linux_iface_up(int sock, const char *ifname)
 	return !!(ifr.ifr_flags & IFF_UP);
 }
 
-
+//取接口ifname的mac地址
 int linux_get_ifhwaddr(int sock, const char *ifname, u8 *addr)
 {
 	struct ifreq ifr;
@@ -99,7 +100,7 @@ int linux_get_ifhwaddr(int sock, const char *ifname, u8 *addr)
 	return 0;
 }
 
-
+//设置接口ifname的mac地址
 int linux_set_ifhwaddr(int sock, const char *ifname, const u8 *addr)
 {
 	struct ifreq ifr;

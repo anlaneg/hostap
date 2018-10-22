@@ -48,6 +48,7 @@ try_again:
 	left = recvfrom(sock, buf, sizeof(buf), MSG_DONTWAIT,
 			(struct sockaddr *) &from, &fromlen);
 	if (left < 0) {
+		//读netlink消息失败处理，处理非阻塞及信号中断
 		if (errno != EINTR && errno != EAGAIN)
 			wpa_printf(MSG_INFO, "netlink: recvfrom failed: %s",
 				   strerror(errno));
@@ -57,10 +58,12 @@ try_again:
 	h = (struct nlmsghdr *) buf;
 	while (NLMSG_OK(h, left)) {
 		switch (h->nlmsg_type) {
+		//收到kernel newlink事件，触发newlink回调
 		case RTM_NEWLINK:
 			netlink_receive_link(netlink, netlink->cfg->newlink_cb,
 					     h);
 			break;
+		//收到kernel dellink事件，触发dellink回调
 		case RTM_DELLINK:
 			netlink_receive_link(netlink, netlink->cfg->dellink_cb,
 					     h);
@@ -97,6 +100,7 @@ struct netlink_data * netlink_init(struct netlink_config *cfg)
 	if (netlink == NULL)
 		return NULL;
 
+	//创建netlink socket
 	netlink->sock = socket(PF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
 	if (netlink->sock < 0) {
 		wpa_printf(MSG_ERROR, "netlink: Failed to open netlink "
@@ -107,7 +111,7 @@ struct netlink_data * netlink_init(struct netlink_config *cfg)
 
 	os_memset(&local, 0, sizeof(local));
 	local.nl_family = AF_NETLINK;
-	local.nl_groups = RTMGRP_LINK;
+	local.nl_groups = RTMGRP_LINK;//netlink的link事件组播组
 	if (bind(netlink->sock, (struct sockaddr *) &local, sizeof(local)) < 0)
 	{
 		wpa_printf(MSG_ERROR, "netlink: Failed to bind netlink "
@@ -116,6 +120,7 @@ struct netlink_data * netlink_init(struct netlink_config *cfg)
 		return NULL;
 	}
 
+	//注册netlink事件处理函数，处理newlink,dellink事件
 	eloop_register_read_sock(netlink->sock, netlink_receive, netlink,
 				 NULL);
 

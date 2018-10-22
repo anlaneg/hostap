@@ -44,6 +44,7 @@ static u32 get_nl80211_protocol_features(struct wpa_driver_nl80211_data *drv)
 	if (!msg)
 		return 0;
 
+	//向kernel发送命令，并解析其响应
 	if (!nl80211_cmd(drv, msg, 0, NL80211_CMD_GET_PROTOCOL_FEATURES)) {
 		nlmsg_free(msg);
 		return 0;
