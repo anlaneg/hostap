@@ -237,6 +237,7 @@ static inline int hostapd_drv_set_radius_acl_expire(struct hostapd_data *hapd,
 	return hapd->driver->set_radius_acl_expire(hapd->drv_priv, mac);
 }
 
+//设置认证算法
 static inline int hostapd_drv_set_authmode(struct hostapd_data *hapd,
 					   int auth_algs)
 {

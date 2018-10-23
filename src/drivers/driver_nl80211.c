@@ -1538,7 +1538,7 @@ int nl80211_get_link_noise(struct wpa_driver_nl80211_data *drv,
 	return send_and_recv_msgs(drv, msg, get_link_noise, sig_change);
 }
 
-
+//收取nl80211事件
 static void wpa_driver_nl80211_event_receive(int sock, void *eloop_ctx,
 					     void *handle)
 {
@@ -1547,6 +1547,7 @@ static void wpa_driver_nl80211_event_receive(int sock, void *eloop_ctx,
 
 	wpa_printf(MSG_MSGDUMP, "nl80211: Event message available");
 
+	//如果cb->cb_recvmsgs_ow存在，则此回调将被调用
 	res = nl_recvmsgs(handle, cb);
 	if (res < 0) {
 		wpa_printf(MSG_INFO, "nl80211: %s->nl_recvmsgs failed: %d",
@@ -1632,6 +1633,7 @@ static int wpa_driver_nl80211_init_nl_global(struct nl80211_global *global)
 {
 	int ret;
 
+	//申请netlink回调控制块
 	global->nl_cb = nl_cb_alloc(NL_CB_DEFAULT);
 	if (global->nl_cb == NULL) {
 		wpa_printf(MSG_ERROR, "nl80211: Failed to allocate netlink "
@@ -1694,11 +1696,14 @@ static int wpa_driver_nl80211_init_nl_global(struct nl80211_global *global)
 		/* Continue without vendor events */
 	}
 
+	//设置seq_check类型的回调为no_seq_check
 	nl_cb_set(global->nl_cb, NL_CB_SEQ_CHECK, NL_CB_CUSTOM,
 		  no_seq_check, NULL);
+	//设置有效类型消息的回调为process_global_event（收到的消息最后一个回调，参见libnl代码）
 	nl_cb_set(global->nl_cb, NL_CB_VALID, NL_CB_CUSTOM,
 		  process_global_event, global);
 
+	//注册nl80211事件收取，事件将被process_global_event处理（具体参见libnl代码）
 	nl80211_register_eloop_read(&global->nl_event,
 				    wpa_driver_nl80211_event_receive,
 				    global->nl_cb, 0);

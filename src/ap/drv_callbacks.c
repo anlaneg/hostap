@@ -1522,7 +1522,7 @@ static void hostapd_event_wds_sta_interface_status(struct hostapd_data *hapd,
 		ifname, MAC2STR(addr));
 }
 
-
+//处理事件
 void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 			  union wpa_event_data *data)
 {

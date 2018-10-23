@@ -3109,7 +3109,7 @@ const char * hostapd_state_text(enum hostapd_iface_state s)
 	return "UNKNOWN";
 }
 
-
+//显示接口状态变换
 void hostapd_set_state(struct hostapd_iface *iface, enum hostapd_iface_state s)
 {
 	wpa_printf(MSG_INFO, "%s: interface state %s->%s",

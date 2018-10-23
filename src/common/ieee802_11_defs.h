@@ -24,7 +24,9 @@
 #define WLAN_FC_ISWEP		0x4000
 #define WLAN_FC_ORDER		0x8000
 
+//取帧类型
 #define WLAN_FC_GET_TYPE(fc)	(((fc) & 0x000c) >> 2)
+//取帧子类型
 #define WLAN_FC_GET_STYPE(fc)	(((fc) & 0x00f0) >> 4)
 
 #define WLAN_INVALID_MGMT_SEQ   0xFFFF
@@ -33,22 +35,24 @@
 #define WLAN_GET_SEQ_SEQ(seq) \
 	(((seq) & (~(BIT(3) | BIT(2) | BIT(1) | BIT(0)))) >> 4)
 
-#define WLAN_FC_TYPE_MGMT		0
-#define WLAN_FC_TYPE_CTRL		1
-#define WLAN_FC_TYPE_DATA		2
+//帧类型
+#define WLAN_FC_TYPE_MGMT		0 //管理帧
+#define WLAN_FC_TYPE_CTRL		1 //控制帧
+#define WLAN_FC_TYPE_DATA		2 //数据帧
 
 /* management */
-#define WLAN_FC_STYPE_ASSOC_REQ		0
-#define WLAN_FC_STYPE_ASSOC_RESP	1
-#define WLAN_FC_STYPE_REASSOC_REQ	2
-#define WLAN_FC_STYPE_REASSOC_RESP	3
-#define WLAN_FC_STYPE_PROBE_REQ		4
-#define WLAN_FC_STYPE_PROBE_RESP	5
-#define WLAN_FC_STYPE_BEACON		8
-#define WLAN_FC_STYPE_ATIM		9
-#define WLAN_FC_STYPE_DISASSOC		10
-#define WLAN_FC_STYPE_AUTH		11
-#define WLAN_FC_STYPE_DEAUTH		12
+#define WLAN_FC_STYPE_ASSOC_REQ		0 //关联请求
+#define WLAN_FC_STYPE_ASSOC_RESP	1 //关联响应
+#define WLAN_FC_STYPE_REASSOC_REQ	2 //重新关联请求
+#define WLAN_FC_STYPE_REASSOC_RESP	3 //重新关联响应
+#define WLAN_FC_STYPE_PROBE_REQ		4　//探测请求
+#define WLAN_FC_STYPE_PROBE_RESP	5 //探测响应
+//0110-0111 标记被保留
+#define WLAN_FC_STYPE_BEACON		8　　//信标帧
+#define WLAN_FC_STYPE_ATIM		　　　　9　　//ATIM帧
+#define WLAN_FC_STYPE_DISASSOC		10　//解关联
+#define WLAN_FC_STYPE_AUTH		　　　　11　//身份认证
+#define WLAN_FC_STYPE_DEAUTH		12　//解除认证
 #define WLAN_FC_STYPE_ACTION		13
 
 /* control */

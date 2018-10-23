@@ -1312,7 +1312,7 @@ static void nl80211_new_station_event(struct wpa_driver_nl80211_data *drv,
 			ies_len = nla_len(tb[NL80211_ATTR_IE]);
 		}
 		wpa_hexdump(MSG_DEBUG, "nl80211: Assoc Req IEs", ies, ies_len);
-		drv_event_assoc(bss->ctx, addr, ies, ies_len, 0);
+		drv_event_assoc(bss->ctx, addr, ies, ies_len, 0);//实现关联
 		return;
 	}
 
@@ -2486,7 +2486,7 @@ static void do_process_drv_event(struct i802_bss *bss, int cmd,
 		wpa_supplicant_event(drv->ctx, EVENT_CHANNEL_LIST_CHANGED,
 				     &data);
 		break;
-	case NL80211_CMD_NEW_STATION:
+	case NL80211_CMD_NEW_STATION://接入新的station
 		nl80211_new_station_event(drv, bss, tb);
 		break;
 	case NL80211_CMD_DEL_STATION:
@@ -2535,7 +2535,7 @@ static void do_process_drv_event(struct i802_bss *bss, int cmd,
 	}
 }
 
-
+//收到kernel通过netlink发送过来的事件消息
 int process_global_event(struct nl_msg *msg, void *arg)
 {
 	struct nl80211_global *global = arg;
@@ -2571,6 +2571,7 @@ int process_global_event(struct nl_msg *msg, void *arg)
 			    (wiphy_idx_set && wiphy_idx == wiphy_idx_rx) ||
 			    (wdev_id_set && bss->wdev_id_set &&
 			     wdev_id == bss->wdev_id)) {
+				//具体处理驱动事件
 				do_process_drv_event(bss, gnlh->cmd, tb);
 				return NL_SKIP;
 			}

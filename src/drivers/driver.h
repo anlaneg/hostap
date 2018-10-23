@@ -5081,8 +5081,8 @@ union wpa_event_data {
 	 * struct rx_mgmt - Data for EVENT_RX_MGMT events
 	 */
 	struct rx_mgmt {
-		const u8 *frame;
-		size_t frame_len;
+		const u8 *frame;//指向报文
+		size_t frame_len;//报文长度
 		u32 datarate;
 
 		/**

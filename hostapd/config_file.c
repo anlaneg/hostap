@@ -2789,6 +2789,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		bss->radius_das_require_message_authenticator = atoi(pos);
 #endif /* CONFIG_NO_RADIUS */
 	} else if (os_strcmp(buf, "auth_algs") == 0) {
+		//设置认证算法
 		bss->auth_algs = atoi(pos);
 		if (bss->auth_algs == 0) {
 			wpa_printf(MSG_ERROR, "Line %d: no authentication algorithms allowed",

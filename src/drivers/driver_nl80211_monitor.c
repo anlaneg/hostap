@@ -71,30 +71,31 @@ static void handle_frame(struct wpa_driver_nl80211_data *drv,
 	u16 fc;
 	union wpa_event_data event;
 
-	hdr = (struct ieee80211_hdr *) buf;
+	hdr = (struct ieee80211_hdr *) buf;//指向80211报文头部
 	fc = le_to_host16(hdr->frame_control);
 
+	//获取帧类型（已转为主机序，故序列0xc0处为type字段）
 	switch (WLAN_FC_GET_TYPE(fc)) {
-	case WLAN_FC_TYPE_MGMT:
+	case WLAN_FC_TYPE_MGMT://管理帧
 		os_memset(&event, 0, sizeof(event));
 		event.rx_mgmt.frame = buf;
 		event.rx_mgmt.frame_len = len;
 		event.rx_mgmt.datarate = datarate;
 		event.rx_mgmt.ssi_signal = ssi_signal;
-		wpa_supplicant_event(drv->ctx, EVENT_RX_MGMT, &event);
+		wpa_supplicant_event(drv->ctx, EVENT_RX_MGMT/*收到管理报文*/, &event);
 		break;
-	case WLAN_FC_TYPE_CTRL:
+	case WLAN_FC_TYPE_CTRL://控制帧
 		/* can only get here with PS-Poll frames */
 		wpa_printf(MSG_DEBUG, "CTRL");
 		from_unknown_sta(drv, buf, len);
 		break;
-	case WLAN_FC_TYPE_DATA:
+	case WLAN_FC_TYPE_DATA://数据帧
 		from_unknown_sta(drv, buf, len);
 		break;
 	}
 }
 
-
+//monitor接口报文收取
 static void handle_monitor_read(int sock, void *eloop_ctx, void *sock_ctx)
 {
 	struct wpa_driver_nl80211_data *drv = eloop_ctx;
@@ -105,6 +106,7 @@ static void handle_monitor_read(int sock, void *eloop_ctx, void *sock_ctx)
 	int datarate = 0, ssi_signal = 0;
 	int injected = 0, failed = 0, rxflags = 0;
 
+	//收取报文
 	len = recv(sock, buf, sizeof(buf), 0);
 	if (len < 0) {
 		wpa_printf(MSG_ERROR, "nl80211: Monitor socket recv failed: %s",
@@ -277,7 +279,7 @@ static struct sock_fprog msock_filter = {
 	.filter = msock_filter_insns,
 };
 
-
+//向kernel下发bpf　filter代码，仅合乎要求的报文送上来
 static int add_monitor_filter(int s)
 {
 	int idx;
@@ -306,6 +308,7 @@ static int add_monitor_filter(int s)
 		}
 	}
 
+	//下发bpf代码
 	if (setsockopt(s, SOL_SOCKET, SO_ATTACH_FILTER,
 		       &msock_filter, sizeof(msock_filter))) {
 		wpa_printf(MSG_ERROR, "nl80211: setsockopt(SO_ATTACH_FILTER) failed: %s",
@@ -384,7 +387,7 @@ int nl80211_create_monitor_interface(struct wpa_driver_nl80211_data *drv)
 				     0, NULL, NULL, 0);
 
 	if (drv->monitor_ifidx == -EOPNOTSUPP) {
-		//后端不支持时进入
+		//后端不支持创建monitor接口
 		/*
 		 * This is backward compatibility for a few versions of
 		 * the kernel only that didn't advertise the right
@@ -402,22 +405,26 @@ int nl80211_create_monitor_interface(struct wpa_driver_nl80211_data *drv)
 	if (linux_set_iface_flags(drv->global->ioctl_sock, buf, 1))
 		goto error;
 
+	//创建针对设备monitor的raw socket
 	memset(&ll, 0, sizeof(ll));
 	ll.sll_family = AF_PACKET;
 	ll.sll_ifindex = drv->monitor_ifidx;
 	drv->monitor_sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
 	if (drv->monitor_sock < 0) {
+		//socket创建失败
 		wpa_printf(MSG_ERROR, "nl80211: socket[PF_PACKET,SOCK_RAW] failed: %s",
 			   strerror(errno));
 		goto error;
 	}
 
+	//设置过滤条件
 	if (add_monitor_filter(drv->monitor_sock)) {
 		wpa_printf(MSG_INFO, "Failed to set socket filter for monitor "
 			   "interface; do filtering in user space");
 		/* This works, but will cost in performance. */
 	}
 
+	//绑定raw socket收取monitor接口
 	if (bind(drv->monitor_sock, (struct sockaddr *) &ll, sizeof(ll)) < 0) {
 		wpa_printf(MSG_ERROR, "nl80211: monitor socket bind failed: %s",
 			   strerror(errno));
@@ -433,6 +440,7 @@ int nl80211_create_monitor_interface(struct wpa_driver_nl80211_data *drv)
 		goto error;
 	}
 
+	//注册收包函数
 	if (eloop_register_read_sock(drv->monitor_sock, handle_monitor_read,
 				     drv, NULL)) {
 		wpa_printf(MSG_INFO, "nl80211: Could not register monitor read socket");

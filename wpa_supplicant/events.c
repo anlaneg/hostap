@@ -4366,7 +4366,7 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 		if (data)
 			wpas_event_dfs_cac_aborted(wpa_s, &data->dfs_event);
 		break;
-	case EVENT_RX_MGMT: {
+	case EVENT_RX_MGMT: {//收到管理帧
 		u16 fc, stype;
 		const struct ieee80211_mgmt *mgmt;
 
@@ -4390,12 +4390,13 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 		mgmt = (const struct ieee80211_mgmt *)
 			data->rx_mgmt.frame;
 		fc = le_to_host16(mgmt->frame_control);
-		stype = WLAN_FC_GET_STYPE(fc);
+		stype = WLAN_FC_GET_STYPE(fc);//取子类型
 
 #ifdef CONFIG_AP
 		if (wpa_s->ap_iface == NULL) {
 #endif /* CONFIG_AP */
 #ifdef CONFIG_P2P
+			//收到请求探测帧
 			if (stype == WLAN_FC_STYPE_PROBE_REQ &&
 			    data->rx_mgmt.frame_len > IEEE80211_HDRLEN) {
 				const u8 *src = mgmt->sa;
