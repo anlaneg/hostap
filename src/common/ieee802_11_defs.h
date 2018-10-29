@@ -781,7 +781,7 @@ struct ieee80211_mgmt {
 	le16 duration;
 	u8 da[6];
 	u8 sa[6];
-	u8 bssid[6];
+	u8 bssid[6];//中转mac
 	le16 seq_ctrl;
 	union {
 		struct {

@@ -4454,6 +4454,7 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 #ifdef CONFIG_AP
 		}
 
+		//探测请求
 		if (stype == WLAN_FC_STYPE_PROBE_REQ &&
 		    data->rx_mgmt.frame_len > IEEE80211_HDRLEN) {
 			const u8 *ie;

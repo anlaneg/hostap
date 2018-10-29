@@ -71,7 +71,8 @@ static void handle_frame(struct wpa_driver_nl80211_data *drv,
 	u16 fc;
 	union wpa_event_data event;
 
-	hdr = (struct ieee80211_hdr *) buf;//指向80211报文头部
+	//指向80211报文头部
+	hdr = (struct ieee80211_hdr *) buf;
 	fc = le_to_host16(hdr->frame_control);
 
 	//获取帧类型（已转为主机序，故序列0xc0处为type字段）

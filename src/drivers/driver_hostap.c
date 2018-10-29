@@ -177,16 +177,16 @@ static void handle_frame(struct hostap_driver_data *drv, u8 *buf, size_t len)
 	}
 
 	switch (type) {
-	case WLAN_FC_TYPE_MGMT:
+	case WLAN_FC_TYPE_MGMT://管理帧
 		os_memset(&event, 0, sizeof(event));
 		event.rx_mgmt.frame = buf;
 		event.rx_mgmt.frame_len = data_len;
 		wpa_supplicant_event(drv->hapd, EVENT_RX_MGMT, &event);
 		break;
-	case WLAN_FC_TYPE_CTRL:
+	case WLAN_FC_TYPE_CTRL://控制帧
 		wpa_printf(MSG_DEBUG, "CTRL");
 		break;
-	case WLAN_FC_TYPE_DATA:
+	case WLAN_FC_TYPE_DATA://数据帧
 		wpa_printf(MSG_DEBUG, "DATA");
 		handle_data(drv, buf, data_len, stype);
 		break;
