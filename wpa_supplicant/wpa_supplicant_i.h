@@ -108,7 +108,7 @@ struct wpa_interface {
 	 * frames. This can be enabled by setting this variable to enable
 	 * receiving of EAPOL frames from an additional interface.
 	 */
-	const char *bridge_ifname;
+	const char *bridge_ifname;//桥接口名称
 
 	/**
 	 * p2p_mgmt - Interface used for P2P management (P2P Device operations)
