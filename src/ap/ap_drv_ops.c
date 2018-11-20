@@ -621,7 +621,7 @@ int hostapd_driver_commit(struct hostapd_data *hapd)
 	return hapd->driver->commit(hapd->drv_priv);
 }
 
-
+//是否none driver
 int hostapd_drv_none(struct hostapd_data *hapd)
 {
 	return hapd->driver && os_strcmp(hapd->driver->name, "none") == 0;
