@@ -2370,10 +2370,12 @@ static void do_process_drv_event(struct i802_bss *bss, int cmd,
 		wpa_supplicant_event(drv->ctx, EVENT_SCAN_STARTED, NULL);
 		break;
 	case NL80211_CMD_START_SCHED_SCAN:
+		//收到kernel通知，扫描开始
 		wpa_dbg(drv->ctx, MSG_DEBUG, "nl80211: Sched scan started");
 		drv->scan_state = SCHED_SCAN_STARTED;
 		break;
 	case NL80211_CMD_SCHED_SCAN_STOPPED:
+		//收到kernel通知，扫描停止
 		wpa_dbg(drv->ctx, MSG_DEBUG, "nl80211: Sched scan stopped");
 		drv->scan_state = SCHED_SCAN_STOPPED;
 		wpa_supplicant_event(drv->ctx, EVENT_SCHED_SCAN_STOPPED, NULL);
@@ -2552,6 +2554,7 @@ int process_global_event(struct nl_msg *msg, void *arg)
 		  genlmsg_attrlen(gnlh, 0), NULL);
 
 	if (tb[NL80211_ATTR_IFINDEX])
+		//接口ifindex
 		ifidx = nla_get_u32(tb[NL80211_ATTR_IFINDEX]);
 	else if (tb[NL80211_ATTR_WDEV]) {
 		wdev_id = nla_get_u64(tb[NL80211_ATTR_WDEV]);
