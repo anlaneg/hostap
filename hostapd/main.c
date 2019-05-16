@@ -468,7 +468,7 @@ static int hostapd_global_run(struct hapd_interfaces *ifaces, int daemonize,
 	return 0;
 }
 
-
+//显示版本号
 static void show_version(void)
 {
 	fprintf(stderr,
@@ -479,7 +479,7 @@ static void show_version(void)
 		"and contributors\n");
 }
 
-
+//显示帮助信息
 static void usage(void)
 {
 	show_version();
@@ -713,7 +713,8 @@ int main(int argc, char *argv[])
 		case 'd':
 			debug++;
 			if (wpa_debug_level > 0)
-				wpa_debug_level--;//通过增加-d选项，可以提高减少log的级别
+				//通过增加-d选项，可以提高减少log的级别
+				wpa_debug_level--;
 			break;
 		case 'B':
 			//处理为daemon

@@ -203,6 +203,7 @@ static void handle_read(int sock, void *eloop_ctx, void *sock_ctx)
 	int len;
 	unsigned char buf[3000];
 
+	//读取80211报文
 	len = recv(sock, buf, sizeof(buf), 0);
 	if (len < 0) {
 		wpa_printf(MSG_ERROR, "recv: %s", strerror(errno));
@@ -218,6 +219,7 @@ static int hostap_init_sockets(struct hostap_driver_data *drv, u8 *own_addr)
 	struct ifreq ifr;
 	struct sockaddr_ll addr;
 
+	//创建raw socket
 	drv->sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
 	if (drv->sock < 0) {
 		wpa_printf(MSG_ERROR, "socket[PF_PACKET,SOCK_RAW]: %s",
@@ -225,6 +227,7 @@ static int hostap_init_sockets(struct hostap_driver_data *drv, u8 *own_addr)
 		return -1;
 	}
 
+	//注册socket的读事件
 	if (eloop_register_read_sock(drv->sock, handle_read, drv, NULL)) {
 		wpa_printf(MSG_ERROR, "Could not register read socket");
 		return -1;

@@ -357,7 +357,7 @@ static int eloop_sock_table_add_sock(struct eloop_sock_table *table,
 	}
 
 	//构造最后一个表项
-	tmp[table->count].sock = sock;
+	tmp[table->count].sock = sock;//添加fd
 	tmp[table->count].eloop_data = eloop_data;
 	tmp[table->count].user_data = user_data;
 	tmp[table->count].handler = handler;
@@ -1227,6 +1227,7 @@ void eloop_run(void)
 					timeout->handler;
 				//删除定时器
 				eloop_remove_timeout(timeout);
+
 				//执行定时器指明的回调
 				handler(eloop_data, user_data);
 			}
@@ -1257,6 +1258,7 @@ void eloop_run(void)
 					  eloop.max_pollfd_map);
 #endif /* CONFIG_ELOOP_POLL */
 #ifdef CONFIG_ELOOP_SELECT
+
 		//处理fd事件
 		eloop_sock_table_dispatch(&eloop.readers, rfds);
 		eloop_sock_table_dispatch(&eloop.writers, wfds);

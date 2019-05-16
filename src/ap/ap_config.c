@@ -344,6 +344,7 @@ static int hostapd_derive_psk(struct hostapd_ssid *ssid)
 	}
 	wpa_hexdump_ascii(MSG_DEBUG, "SSID",
 			  (u8 *) ssid->ssid, ssid->ssid_len);
+	//日志输出密码
 	wpa_hexdump_ascii_key(MSG_DEBUG, "PSK (ASCII passphrase)",
 			      (u8 *) ssid->wpa_passphrase,
 			      os_strlen(ssid->wpa_passphrase));

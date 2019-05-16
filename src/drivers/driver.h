@@ -2117,7 +2117,7 @@ struct external_auth {
  */
 struct wpa_driver_ops {
 	/** Name of the driver interface */
-	const char *name;
+	const char *name;//驱动名称
 	/** One line description of the driver interface */
 	const char *desc;
 

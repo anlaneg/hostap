@@ -3854,6 +3854,7 @@ static int hostapd_ctrl_iface_dup_param(struct hostapd_data *src_hapd,
 			goto error_stringify;
 	} else if (os_strcmp(param, "wpa_passphrase") == 0 &&
 		   src_hapd->conf->ssid.wpa_passphrase) {
+		//将密码输入到value
 		os_snprintf(value, HOSTAPD_CLI_DUP_VALUE_MAX_LEN, "%s",
 			    src_hapd->conf->ssid.wpa_passphrase);
 	} else if (os_strcmp(param, "wpa_psk") == 0 &&

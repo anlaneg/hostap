@@ -2840,6 +2840,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 	} else if (os_strcmp(buf, "wpa_disable_eapol_key_retries") == 0) {
 		bss->wpa_disable_eapol_key_retries = atoi(pos);
 	} else if (os_strcmp(buf, "wpa_passphrase") == 0) {
+		//配置无线wifi密码
 		int len = os_strlen(pos);
 		if (len < 8 || len > 63) {
 			wpa_printf(MSG_ERROR, "Line %d: invalid WPA passphrase length %d (expected 8..63)",
@@ -2857,6 +2858,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		bss->ssid.wpa_psk = os_zalloc(sizeof(struct hostapd_wpa_psk));
 		if (bss->ssid.wpa_psk == NULL)
 			return 1;
+		//将16进制转换为二进制
 		if (hexstr2bin(pos, bss->ssid.wpa_psk->psk, PMK_LEN) ||
 		    pos[PMK_LEN * 2] != '\0') {
 			wpa_printf(MSG_ERROR, "Line %d: Invalid PSK '%s'.",
@@ -4177,7 +4179,8 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 	}
 
 	/* set default driver based on configuration */
-	conf->driver = wpa_drivers[0];//设置默认驱动为wpa_drivers[0],依据不同宏，会对应到不同driver,例如nl80211
+	//设置默认驱动为wpa_drivers[0],依据不同宏，会对应到不同driver,例如nl80211
+	conf->driver = wpa_drivers[0];
 	if (conf->driver == NULL) {
 		//wap_drivers数组为空，报错
 		wpa_printf(MSG_ERROR, "No driver wrappers registered!");

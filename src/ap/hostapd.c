@@ -2676,7 +2676,7 @@ hostapd_iface_alloc(struct hapd_interfaces *interfaces)
 
 static struct hostapd_config *
 hostapd_config_alloc(struct hapd_interfaces *interfaces, const char *ifname,
-		     const char *ctrl_iface, const char *driver)
+		     const char *ctrl_iface, const char *driver/*要使用的驱动名称*/)
 {
 	struct hostapd_bss_config *bss;
 	struct hostapd_config *conf;
@@ -2694,6 +2694,7 @@ hostapd_config_alloc(struct hapd_interfaces *interfaces, const char *ifname,
 
 		for (j = 0; wpa_drivers[j]; j++) {
 			if (os_strcmp(driver, wpa_drivers[j]->name) == 0) {
+				//设置命中的驱动
 				conf->driver = wpa_drivers[j];
 				goto skip;
 			}
@@ -2704,6 +2705,7 @@ hostapd_config_alloc(struct hapd_interfaces *interfaces, const char *ifname,
 			   driver);
 	}
 
+	//未指定驱动或者未查找指定的驱动，使用默认驱动
 	conf->driver = wpa_drivers[0];
 	if (conf->driver == NULL) {
 		wpa_printf(MSG_ERROR, "No driver wrappers registered!");
