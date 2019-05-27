@@ -150,6 +150,7 @@ static Boolean eap_md5_isSuccess(struct eap_sm *sm, void *priv)
 }
 
 
+//注册md5的eap
 int eap_server_md5_register(void)
 {
 	struct eap_method *eap;

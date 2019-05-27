@@ -88,14 +88,14 @@ struct hostapd_ssid {
 	size_t ssid_len;//设置ssid长度
 	unsigned int ssid_set:1;//标记ssid被填充了
 	unsigned int utf8_ssid:1;
-	unsigned int wpa_passphrase_set:1;
+	unsigned int wpa_passphrase_set:1;//标明已设置无线密码
 	unsigned int wpa_psk_set:1;
 
 	char vlan[IFNAMSIZ + 1];
 	secpolicy security_policy;
 
 	struct hostapd_wpa_psk *wpa_psk;
-	char *wpa_passphrase;
+	char *wpa_passphrase;//无线密码
 	char *wpa_psk_file;
 
 	struct hostapd_wep_keys wep;
@@ -250,8 +250,8 @@ struct sae_password_entry {
  * struct hostapd_bss_config - Per-BSS configuration
  */
 struct hostapd_bss_config {
-	char iface[IFNAMSIZ + 1];//接口名称
-	char bridge[IFNAMSIZ + 1];//桥名称
+	char iface[IFNAMSIZ + 1];//ap网络设备名称
+	char bridge[IFNAMSIZ + 1];//ap网络设备对应的桥名称
 	char vlan_bridge[IFNAMSIZ + 1];//vlan桥名称（支持vlan转发）
 	char wds_bridge[IFNAMSIZ + 1];
 
@@ -425,7 +425,7 @@ struct hostapd_bss_config {
 
 	struct hostapd_vlan *vlan;
 
-	macaddr bssid;
+	macaddr bssid;//bss的mac地址
 
 	/*
 	 * Maximum listen interval that STAs can use when associating with this

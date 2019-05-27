@@ -50,7 +50,7 @@ struct hapd_interfaces {
 					    void *ctx), void *ctx);
 	int (*driver_init)(struct hostapd_iface *iface);
 
-	size_t count;
+	size_t count;//接口数目
 	int global_ctrl_sock;
 	struct dl_list global_ctrl_dst;
 	char *global_iface_path;
@@ -58,6 +58,8 @@ struct hapd_interfaces {
 #ifndef CONFIG_NATIVE_WINDOWS
 	gid_t ctrl_iface_group;//所属组
 #endif /* CONFIG_NATIVE_WINDOWS */
+	//数量为count+bss_config_count
+	//用户配置的接口（每个接口需要一个配置文件）
 	struct hostapd_iface **iface;
 
 	size_t terminate_on_error;
@@ -67,6 +69,7 @@ struct hapd_interfaces {
 #ifdef CONFIG_ETH_P_OUI
 	struct dl_list eth_p_oui; /* OUI Extended EtherType handlers */
 #endif /* CONFIG_ETH_P_OUI */
+	//标记eloop已初始化
 	int eloop_initialized;
 
 #ifdef CONFIG_DPP
@@ -392,10 +395,10 @@ struct hostapd_sta_info {
  * struct hostapd_iface - hostapd per-interface data structure
  */
 struct hostapd_iface {
-	struct hapd_interfaces *interfaces;
+	struct hapd_interfaces *interfaces;//接口函数
 	void *owner;
-	char *config_fname;//配置文件名称(例如ap.config)
-	struct hostapd_config *conf;//自配置文件中读取到的配置信息
+	char *config_fname;//接口配置文件名称(例如ap.config)
+	struct hostapd_config *conf;//接口对应的配置信息，自配置文件中读取到
 	char phy[16]; /* Name of the PHY (radio) */
 
 	enum hostapd_iface_state {

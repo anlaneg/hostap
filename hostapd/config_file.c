@@ -2337,11 +2337,11 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 			       const char *buf, char *pos, int line)
 {
 	if (os_strcmp(buf, "interface") == 0) {
-		//设置接口名称，由于是同一个interface，故总是设置首个bss
+		//设置接口名称
 		os_strlcpy(conf->bss[0]->iface, pos,
 			   sizeof(conf->bss[0]->iface));
 	} else if (os_strcmp(buf, "bridge") == 0) {
-		//设置配置的桥
+		//设置配置的桥名称，对nl80211有用
 		os_strlcpy(bss->bridge, pos, sizeof(bss->bridge));
 	} else if (os_strcmp(buf, "vlan_bridge") == 0) {
 		//设置vlan桥(支持vlan转发）
@@ -2419,6 +2419,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		bss->ssid.ssid_set = 1;
 		os_free(str);
 	} else if (os_strcmp(buf, "utf8_ssid") == 0) {
+		//指出ssid采用utf8编码
 		bss->ssid.utf8_ssid = atoi(pos) > 0;
 	} else if (os_strcmp(buf, "macaddr_acl") == 0) {
 		enum macaddr_acl acl = atoi(pos);
@@ -4154,7 +4155,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
  * @fname: Configuration file name (including path, if needed)
  * Returns: Allocated configuration data structure
  */
-//读取配置文件，返回配值
+//读取接口配置文件，返回配置
 struct hostapd_config * hostapd_config_read(const char *fname)
 {
 	struct hostapd_config *conf;
@@ -4164,6 +4165,7 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 	int errors = 0;
 	size_t i;
 
+	//打开配置文件
 	f = fopen(fname, "r");
 	if (f == NULL) {
 		wpa_printf(MSG_ERROR, "Could not open configuration file '%s' "
@@ -4221,7 +4223,8 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 			wpa_printf(MSG_ERROR, "Line %d: invalid line '%s'",
 				   line, buf);
 			errors++;
-			continue;//忽略非key,value行
+			//忽略非key,value行
+			continue;
 		}
 		*pos = '\0';//将key，value独立为字符串
 		pos++;

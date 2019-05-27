@@ -341,14 +341,16 @@ static void random_read_entropy(void)
 	char *buf;
 	size_t len;
 
+	//如果未设置entropy文件，则直接返回
 	if (!random_entropy_file)
-		return;//如果未设置entropy文件，则直接返回
+		return;
 
 	buf = os_readfile(random_entropy_file, &len);
 	if (buf == NULL)
 		return; /* entropy file not yet available */
 
 	if (len != 1 + RANDOM_ENTROPY_SIZE) {
+		/*文件内容长度不合乎约定，报错*/
 		wpa_printf(MSG_DEBUG, "random: Invalid entropy file %s",
 			   random_entropy_file);
 		os_free(buf);

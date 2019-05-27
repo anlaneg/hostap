@@ -33,7 +33,7 @@
 
 struct hapd_global {
 	void **drv_priv;//各驱动的私有数据（数组类型）
-	size_t drv_count;//驱动的数目
+	size_t drv_count;//当前支持的驱动总数目
 };
 
 static struct hapd_global global;
@@ -151,6 +151,7 @@ static void hostapd_logger_cb(void *ctx, const u8 *addr, unsigned int module,
 /**
  * hostapd_driver_init - Preparate driver interface
  */
+//初始化指定设备的驱动
 static int hostapd_driver_init(struct hostapd_iface *iface)
 {
 	struct wpa_init_params params;
@@ -160,6 +161,7 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
 	u8 *b = conf->bssid;
 	struct wpa_driver_capa capa;
 
+	//驱动必须存在，且驱动必须有 hapd_init函数
 	if (hapd->driver == NULL || hapd->driver->hapd_init == NULL) {
 		wpa_printf(MSG_ERROR, "No hostapd driver wrapper available");
 		return -1;
@@ -173,12 +175,12 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
 	os_memset(&params, 0, sizeof(params));
 	for (i = 0; wpa_drivers[i]; i++) {
 		if (wpa_drivers[i] != hapd->driver)
-			continue;//跳过非对应驱动
+			continue;//跳过非指定驱动
 
-		//初始化与hapd->driver相等的drivers，如果
-		//其已初始化，则跳过
+		//初始化与hapd->driver相等的drivers
 		if (global.drv_priv[i] == NULL &&
 		    wpa_drivers[i]->global_init) {
+			/*如果有全局初始化，且未执行全局初始化，则调用，采用global.drv_priv*/
 			global.drv_priv[i] =
 				wpa_drivers[i]->global_init(iface->interfaces);
 			if (global.drv_priv[i] == NULL) {
@@ -262,8 +264,8 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
  */
 //依据配置文件创建hostapd_iface结构
 static struct hostapd_iface *
-hostapd_interface_init(struct hapd_interfaces *interfaces, const char *if_name,
-		       const char *config_fname, int debug)
+hostapd_interface_init(struct hapd_interfaces *interfaces, const char *if_name/*接口名称*/,
+		       const char *config_fname/*接口对应的配置*/, int debug)
 {
 	struct hostapd_iface *iface;
 	int k;
@@ -345,6 +347,7 @@ static void handle_dump_state(int sig, void *signal_ctx)
 #endif /* CONFIG_NATIVE_WINDOWS */
 
 
+//初始化eloop,eap methods,信号注册及global变量初始化
 static int hostapd_global_init(struct hapd_interfaces *interfaces,
 			       const char *entropy_file)
 {
@@ -354,6 +357,7 @@ static int hostapd_global_init(struct hapd_interfaces *interfaces,
 
 	hostapd_logger_register_cb(hostapd_logger_cb);
 
+	//注册支持的eap methods
 	if (eap_server_register_methods()) {
 		wpa_printf(MSG_ERROR, "Failed to register EAP methods");
 		return -1;
@@ -377,7 +381,8 @@ static int hostapd_global_init(struct hapd_interfaces *interfaces,
 	eloop_register_signal_terminate(handle_term, interfaces);
 
 #ifndef CONFIG_NATIVE_WINDOWS
-	openlog("hostapd", 0, LOG_DAEMON);//打开日志
+	//打开日志
+	openlog("hostapd", 0, LOG_DAEMON);
 #endif /* CONFIG_NATIVE_WINDOWS */
 
 	for (i = 0; wpa_drivers[i]; i++)
@@ -387,6 +392,7 @@ static int hostapd_global_init(struct hapd_interfaces *interfaces,
 		wpa_printf(MSG_ERROR, "No drivers enabled");
 		return -1;
 	}
+
 	//为各驱动申请私有结构
 	global.drv_priv = os_calloc(global.drv_count, sizeof(void *));
 	if (global.drv_priv == NULL)
@@ -527,7 +533,7 @@ static const char * hostapd_msg_ifname_cb(void *ctx)
 	return NULL;
 }
 
-//通过参数设置iface_path,iface_name（以最后一个'/'划分）
+//通过参数设置global_iface_path,global_iface_name（以最后一个'/'划分）
 static int hostapd_get_global_ctrl_iface(struct hapd_interfaces *interfaces,
 					 const char *path)
 {
@@ -572,6 +578,7 @@ static int hostapd_get_ctrl_iface_group(struct hapd_interfaces *interfaces,
 		wpa_printf(MSG_ERROR, "Unknown group '%s'", group);
 		return -1;
 	}
+	//设置组id号
 	interfaces->ctrl_iface_group = grp->gr_gid;
 #endif /* CONFIG_NATIVE_WINDOWS */
 	return 0;
@@ -667,22 +674,25 @@ int main(int argc, char *argv[])
 	int ret = 1;
 	size_t i, j;
 	int c, debug = 0, daemonize = 0;
+	//pid文件路径
 	char *pid_file = NULL;
-	const char *log_file = NULL;//日志文件
+	//日志文件
+	const char *log_file = NULL;
 	const char *entropy_file = NULL;
-	char **bss_config = NULL, **tmp_bss;
-	size_t num_bss_configs = 0;
+	char **bss_config = NULL/*记录用户配置的多个bss配置*/, **tmp_bss;
+	size_t num_bss_configs = 0/*记录用户配置的bss配置数目 -b参数指出*/;
 #ifdef CONFIG_DEBUG_LINUX_TRACING
 	int enable_trace_dbg = 0;
 #endif /* CONFIG_DEBUG_LINUX_TRACING */
 	int start_ifaces_in_sync = 0;
-	char **if_names = NULL;
-	size_t if_names_size = 0;
+	char **if_names = NULL/*记录用户配置的接口名称数组*/;
+	size_t if_names_size = 0/*记录用户配置的接口名称数组大小*/;
 
 	//仅android有处理
 	if (os_program_init())
 		return -1;
 
+	//初始化interfaces
 	os_memset(&interfaces, 0, sizeof(interfaces));
 	interfaces.reload_config = hostapd_reload_config;
 	interfaces.config_read_cb = hostapd_config_read;//负责读取各个接口对应的配置文件
@@ -713,7 +723,7 @@ int main(int argc, char *argv[])
 		case 'd':
 			debug++;
 			if (wpa_debug_level > 0)
-				//通过增加-d选项，可以提高减少log的级别
+				//通过增加-d选项，可以提高减少log的级别,实现日志输出更详细
 				wpa_debug_level--;
 			break;
 		case 'B':
@@ -759,7 +769,7 @@ int main(int argc, char *argv[])
 				return -1;
 			break;
 		case 'b':
-			//设置多个b配置
+			//设置多个bss_config配置
 			tmp_bss = os_realloc_array(bss_config,
 						   num_bss_configs + 1,
 						   sizeof(char *));
@@ -792,9 +802,10 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	//所有参数已完成解析，进行合法性检查，如果不合法显示usage,退出
 	if (optind == argc && interfaces.global_iface_path == NULL &&
 	    num_bss_configs == 0)
-		usage();//所有参数已完成解析，进行合法性检查，如果不合法显示usage,退出
+		usage();
 
 	wpa_msg_register_ifname_cb(hostapd_msg_ifname_cb);
 
@@ -855,10 +866,10 @@ int main(int argc, char *argv[])
 		if (i < if_names_size)
 			if_name = if_names[i];
 
-		//如果有多个接口，每个接口一个配置文件(解析配置文件）
+		//如果有多个接口，每个接口一个配置文件(解析相应的配置文件，创建iface）
 		interfaces.iface[i] = hostapd_interface_init(&interfaces,
-							     if_name,
-							     argv[optind + i],//配置文件路径
+							     if_name,/*接口名称*/
+							     argv[optind + i],/*if_name对应的配置文件路径*/
 							     debug);
 		if (!interfaces.iface[i]) {
 			//初始化接口失败
@@ -915,7 +926,7 @@ int main(int argc, char *argv[])
 	 */
 	interfaces.terminate_on_error = interfaces.count;
 	for (i = 0; i < interfaces.count; i++) {
-		//初始化每个接口的驱动
+		//初始化每个接口的驱动，setup每个接口
 		if (hostapd_driver_init(interfaces.iface[i]) ||
 		    hostapd_setup_interface(interfaces.iface[i]))
 			goto out;
@@ -923,7 +934,7 @@ int main(int argc, char *argv[])
 
 	hostapd_global_ctrl_iface_init(&interfaces);
 
-	//此函数将进入事件循环，故此函数结束，则说明进行需要退出了
+	//进入事件循环，当此函数结束时，进程就需要退出了
 	if (hostapd_global_run(&interfaces, daemonize, pid_file)) {
 		wpa_printf(MSG_ERROR, "Failed to start eloop");
 		goto out;

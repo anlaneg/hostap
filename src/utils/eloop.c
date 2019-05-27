@@ -765,9 +765,9 @@ void eloop_unregister_sock(int sock, eloop_event_type type)
 }
 
 //定时器注册
-int eloop_register_timeout(unsigned int secs, unsigned int usecs,
+int eloop_register_timeout(unsigned int secs/*定时器到期时间秒数*/, unsigned int usecs/*定时器到期时间，微秒数*/,
 			   eloop_timeout_handler handler/*定时器过期回调*/,
-			   void *eloop_data, void *user_data)
+			   void *eloop_data/*eloop*/, void *user_data/*用户自定义参数*/)
 {
 	struct eloop_timeout *timeout, *tmp;
 	os_time_t now_sec;
@@ -804,6 +804,7 @@ int eloop_register_timeout(unsigned int secs, unsigned int usecs,
 	timeout->eloop_data = eloop_data;
 	timeout->user_data = user_data;
 	timeout->handler = handler;
+
 	wpa_trace_add_ref(timeout, eloop, eloop_data);
 	wpa_trace_add_ref(timeout, user, user_data);
 	wpa_trace_record(timeout);
@@ -816,6 +817,7 @@ int eloop_register_timeout(unsigned int secs, unsigned int usecs,
 			return 0;
 		}
 	}
+
 	//链表为空时（或者自已最大时），直接加入到结尾
 	dl_list_add_tail(&eloop.timeout, &timeout->list);
 

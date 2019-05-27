@@ -13,7 +13,8 @@
 #include "eap_methods.h"
 
 
-static struct eap_method *eap_methods;//注册eap method(见eap_server_XX.c文件）
+//注册eap method(见eap_server_XX.c文件）
+static struct eap_method *eap_methods;
 
 
 /**
@@ -103,22 +104,25 @@ static void eap_server_method_free(struct eap_method *method)
  * supported EAP method. The caller must not free the allocated method data
  * regardless of the return value.
  */
-int eap_server_method_register(struct eap_method *method)//注册EAP server method
+//注册EAP server method
+int eap_server_method_register(struct eap_method *method)
 {
 	struct eap_method *m, *last = NULL;
 
 	if (method == NULL || method->name == NULL ||
 	    method->version != EAP_SERVER_METHOD_INTERFACE_VERSION) {
+		//无效的注册
 		eap_server_method_free(method);
-		return -1;//无效的注册
+		return -1;
 	}
 
 	for (m = eap_methods; m; m = m->next) {
 		if ((m->vendor == method->vendor &&
 		     m->method == method->method) ||
 		    os_strcmp(m->name, method->name) == 0) {
+			//重复注册
 			eap_server_method_free(method);
-			return -2;//重复注册
+			return -2;
 		}
 		last = m;
 	}

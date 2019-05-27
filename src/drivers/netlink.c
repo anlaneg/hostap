@@ -19,7 +19,7 @@ struct netlink_data {
 	int sock;
 };
 
-
+//触发cb回调，处理link消息
 static void netlink_receive_link(struct netlink_data *netlink,
 				 void (*cb)(void *ctx, struct ifinfomsg *ifi,
 					    u8 *buf, size_t len),
@@ -33,6 +33,7 @@ static void netlink_receive_link(struct netlink_data *netlink,
 }
 
 
+//收到netlink fd可读事件，处理此事件
 static void netlink_receive(int sock, void *eloop_ctx, void *sock_ctx)
 {
 	struct netlink_data *netlink = eloop_ctx;
@@ -90,7 +91,7 @@ try_again:
 	}
 }
 
-
+//注册监听link new,del事件，并调用相应在回调
 struct netlink_data * netlink_init(struct netlink_config *cfg)
 {
 	struct netlink_data *netlink;
@@ -109,9 +110,10 @@ struct netlink_data * netlink_init(struct netlink_config *cfg)
 		return NULL;
 	}
 
+	//注册netlink的link事件组播组
 	os_memset(&local, 0, sizeof(local));
 	local.nl_family = AF_NETLINK;
-	local.nl_groups = RTMGRP_LINK;//netlink的link事件组播组
+	local.nl_groups = RTMGRP_LINK;
 	if (bind(netlink->sock, (struct sockaddr *) &local, sizeof(local)) < 0)
 	{
 		wpa_printf(MSG_ERROR, "netlink: Failed to bind netlink "

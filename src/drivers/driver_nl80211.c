@@ -6664,7 +6664,7 @@ static void handle_eapol(int sock, void *eloop_ctx, void *sock_ctx)
 	int len;
 	socklen_t fromlen = sizeof(lladdr);
 
-	//收取报文
+	//收取pae报文
 	len = recvfrom(sock, buf, sizeof(buf), 0,
 		       (struct sockaddr *)&lladdr, &fromlen);
 	if (len < 0) {
@@ -6673,6 +6673,7 @@ static void handle_eapol(int sock, void *eloop_ctx, void *sock_ctx)
 		return;
 	}
 
+	//如果驱动关注此报文，则走rx
 	if (have_ifidx(drv, lladdr.sll_ifindex, IFIDX_ANY))
 		drv_event_eapol_rx(drv->ctx, lladdr.sll_addr, buf, len);
 }
@@ -6742,7 +6743,7 @@ static int i802_check_bridge(struct wpa_driver_nl80211_data *drv,
 
 
 static void *i802_init(struct hostapd_data *hapd,
-		       struct wpa_init_params *params)
+		       struct wpa_init_params *params/*驱动参数*/)
 {
 	struct wpa_driver_nl80211_data *drv;
 	struct i802_bss *bss;
@@ -7728,7 +7729,7 @@ static int nl80211_set_param(void *priv, const char *param)
 	return 0;
 }
 
-//nl80211驱动初始化
+//nl80211驱动全局初始化（仅执行一次）
 static void * nl80211_global_init(void *ctx)
 {
 	struct nl80211_global *global;
@@ -7749,7 +7750,8 @@ static void * nl80211_global_init(void *ctx)
 	cfg->ctx = global;
 	cfg->newlink_cb = wpa_driver_nl80211_event_rtm_newlink;
 	cfg->dellink_cb = wpa_driver_nl80211_event_rtm_dellink;
-	global->netlink = netlink_init(cfg);//注册netlink回调，处理newlink,dellink事件
+	//注册netlink回调，处理newlink,dellink事件
+	global->netlink = netlink_init(cfg);
 	if (global->netlink == NULL) {
 		os_free(cfg);
 		goto err;
@@ -10695,7 +10697,8 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
 	.deauthenticate = driver_nl80211_deauthenticate,
 	.authenticate = driver_nl80211_authenticate,
 	.associate = wpa_driver_nl80211_associate,
-	.global_init = nl80211_global_init,//初始化
+	//全局初始化
+	.global_init = nl80211_global_init,
 	.global_deinit = nl80211_global_deinit,
 	.init2 = wpa_driver_nl80211_init,
 	.deinit = driver_nl80211_deinit,
@@ -10714,6 +10717,7 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
 	.sta_remove = driver_nl80211_sta_remove,
 	.hapd_send_eapol = wpa_driver_nl80211_hapd_send_eapol,
 	.sta_set_flags = wpa_driver_nl80211_sta_set_flags,
+	/*针对参数初始化驱动*/
 	.hapd_init = i802_init,
 	.hapd_deinit = i802_deinit,
 	.set_wds_sta = i802_set_wds_sta,

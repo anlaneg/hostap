@@ -1829,13 +1829,13 @@ enum wpa_driver_if_type {
 };
 
 struct wpa_init_params {
-	void *global_priv;
-	const u8 *bssid;
-	const char *ifname;
-	const char *driver_params;
+	void *global_priv;//驱动私有数据
+	const u8 *bssid;//设备的mac地址
+	const char *ifname;//ap网络设备名称
+	const char *driver_params;//配置的驱动参数
 	int use_pae_group_addr;
-	char **bridge;
-	size_t num_bridge;
+	char **bridge;//所有bss对应的桥
+	size_t num_bridge;//bridge数目
 
 	u8 *own_addr; /* buffer for writing own MAC address */
 };
@@ -2521,7 +2521,7 @@ struct wpa_driver_ops {
 	 * use init2() function instead of init() to get the pointer to global
 	 * data available to per-interface initializer.
 	 */
-	void * (*global_init)(void *ctx);
+	void * (*global_init)(void *ctx);//全局初始化
 
 	/**
 	 * global_deinit - Global driver deinitialization

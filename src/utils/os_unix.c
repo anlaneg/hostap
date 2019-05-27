@@ -398,13 +398,14 @@ int os_unsetenv(const char *name)
 }
 
 //读取文件内容
-char * os_readfile(const char *name, size_t *len)
+char * os_readfile(const char *name, size_t *len/*出参，返回文件大小*/)
 {
 	FILE *f;
 	char *buf;
 	long pos;
 
-	f = fopen(name, "rb");//打开文件
+	//打开文件
+	f = fopen(name, "rb");
 	if (f == NULL)
 		return NULL;
 

@@ -2312,13 +2312,14 @@ struct hostapd_iface * hostapd_alloc_iface(void)
  * hostapd_cleanup_iface().
  */
 struct hostapd_iface * hostapd_init(struct hapd_interfaces *interfaces,
-				    const char *config_file)
+				    const char *config_file/*接口配置文件*/)
 {
 	struct hostapd_iface *hapd_iface = NULL;
 	struct hostapd_config *conf = NULL;
 	struct hostapd_data *hapd;
 	size_t i;
 
+	//申请结构，每个接口一个这样的结构
 	hapd_iface = hostapd_alloc_iface();
 	if (hapd_iface == NULL)
 		goto fail;
@@ -2327,7 +2328,7 @@ struct hostapd_iface * hostapd_init(struct hapd_interfaces *interfaces,
 	if (hapd_iface->config_fname == NULL)
 		goto fail;//配置文件为空或者申请内存失败
 
-	//解析配置文件，并读取其配置
+	//通过接口类，解析配置文件，产生conf(看hostapd_config_read函数）
 	conf = interfaces->config_read_cb(hapd_iface->config_fname);
 	if (conf == NULL)
 		goto fail;
@@ -2351,6 +2352,7 @@ struct hostapd_iface * hostapd_init(struct hapd_interfaces *interfaces,
 	return hapd_iface;
 
 fail:
+	//初始化接口失败
 	wpa_printf(MSG_ERROR, "Failed to set up interface with %s",
 		   config_file);
 	if (conf)
