@@ -45,14 +45,14 @@
 #define WLAN_FC_STYPE_ASSOC_RESP	1 //关联响应
 #define WLAN_FC_STYPE_REASSOC_REQ	2 //重新关联请求
 #define WLAN_FC_STYPE_REASSOC_RESP	3 //重新关联响应
-#define WLAN_FC_STYPE_PROBE_REQ		4　//探测请求
+#define WLAN_FC_STYPE_PROBE_REQ		4 //探测请求
 #define WLAN_FC_STYPE_PROBE_RESP	5 //探测响应
 //0110-0111 标记被保留
-#define WLAN_FC_STYPE_BEACON		8　　//信标帧
-#define WLAN_FC_STYPE_ATIM		　　　　9　　//ATIM帧
-#define WLAN_FC_STYPE_DISASSOC		10　//解关联
-#define WLAN_FC_STYPE_AUTH		　　　　11　//身份认证
-#define WLAN_FC_STYPE_DEAUTH		12　//解除认证
+#define WLAN_FC_STYPE_BEACON		8   //信标帧
+#define WLAN_FC_STYPE_ATIM		9   //ATIM帧
+#define WLAN_FC_STYPE_DISASSOC		10  //解关联
+#define WLAN_FC_STYPE_AUTH		11  //身份认证
+#define WLAN_FC_STYPE_DEAUTH		12  //解除认证
 #define WLAN_FC_STYPE_ACTION		13
 
 /* control */
