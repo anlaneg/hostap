@@ -859,14 +859,14 @@ static int wpa_driver_nl80211_get_bssid(void *priv, u8 *bssid)
 }
 
 
-static int wpa_driver_nl80211_get_ssid(void *priv, u8 *ssid)
+static int wpa_driver_nl80211_get_ssid(void *priv, u8 *ssid/*出参，记录ssid*/)
 {
 	struct i802_bss *bss = priv;
 	struct wpa_driver_nl80211_data *drv = bss->drv;
 	if (!drv->associated)
 		return -1;
 	os_memcpy(ssid, drv->ssid, drv->ssid_len);
-	return drv->ssid_len;
+	return drv->ssid_len;/*返回ssid长度*/
 }
 
 
@@ -2535,7 +2535,8 @@ wpa_driver_nl80211_finish_drv_init(struct wpa_driver_nl80211_data *drv,
 	int send_rfkill_event = 0;
 	enum nl80211_iftype nlmode;
 
-	drv->ifindex = if_nametoindex(bss->ifname);//通过接口名称取ifindex
+	//通过接口名称取ifindex
+	drv->ifindex = if_nametoindex(bss->ifname);
 	bss->ifindex = drv->ifindex;
 	bss->wdev_id = drv->global->if_add_wdevid;
 	bss->wdev_id_set = drv->global->if_add_wdevid_set;
@@ -2948,6 +2949,7 @@ static int wpa_driver_nl80211_set_key(const char *ifname, struct i802_bss *bss,
 	if (drv->nlmode == NL80211_IFTYPE_P2P_DEVICE)
 		return 0;
 
+	//接口ifindex
 	ifindex = if_nametoindex(ifname);
 	wpa_printf(MSG_DEBUG, "%s: ifindex=%d (%s) alg=%d addr=%p key_idx=%d "
 		   "set_tx=%d seq_len=%lu key_len=%lu",
@@ -2985,6 +2987,7 @@ static int wpa_driver_nl80211_set_key(const char *ifname, struct i802_bss *bss,
 		if (!suite)
 			goto fail;
 		msg = nl80211_ifindex_msg(drv, ifindex, 0, NL80211_CMD_NEW_KEY);
+		//存入key
 		if (!msg ||
 		    nla_put(msg, NL80211_ATTR_KEY_DATA, key_len, key) ||
 		    nla_put_u32(msg, NL80211_ATTR_KEY_CIPHER, suite))
@@ -6741,7 +6744,7 @@ static int i802_check_bridge(struct wpa_driver_nl80211_data *drv,
 	return 0;
 }
 
-
+//将wlan口加入到桥
 static void *i802_init(struct hostapd_data *hapd,
 		       struct wpa_init_params *params/*驱动参数*/)
 {

@@ -2119,7 +2119,7 @@ struct wpa_driver_ops {
 	/** Name of the driver interface */
 	const char *name;//驱动名称
 	/** One line description of the driver interface */
-	const char *desc;
+	const char *desc;//驱动描述信息
 
 	/**
 	 * get_bssid - Get the current BSSID
