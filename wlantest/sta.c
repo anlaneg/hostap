@@ -156,7 +156,8 @@ void sta_update_assoc(struct wlantest_sta *sta, struct ieee802_11_elems *elems)
 			   MAC2STR(sta->addr), sta->pairwise_cipher,
 			   MAC2STR(bss->bssid), bss->pairwise_cipher);
 	}
-	if (sta->proto && data.group_cipher != bss->group_cipher) {
+	if (sta->proto && data.group_cipher != bss->group_cipher &&
+	    bss->ies_set) {
 		wpa_printf(MSG_INFO, "Mismatch in group cipher: STA "
 			   MACSTR " 0x%x != BSS " MACSTR " 0x%x",
 			   MAC2STR(sta->addr), data.group_cipher,
@@ -168,13 +169,19 @@ void sta_update_assoc(struct wlantest_sta *sta, struct ieee802_11_elems *elems)
 			   "without MFP to BSS " MACSTR " that advertises "
 			   "MFPR", MAC2STR(sta->addr), MAC2STR(bss->bssid));
 	}
+	if ((sta->rsn_capab & WPA_CAPABILITY_OCVC) &&
+	    !(sta->rsn_capab & WPA_CAPABILITY_MFPC)) {
+		wpa_printf(MSG_INFO, "STA " MACSTR " tries to associate "
+			   "without MFP to BSS " MACSTR " while supporting "
+			   "OCV", MAC2STR(sta->addr), MAC2STR(bss->bssid));
+	}
 
 skip_rsn_wpa:
 	wpa_printf(MSG_INFO, "STA " MACSTR
 		   " proto=%s%s%s%s"
 		   "pairwise=%s%s%s%s%s%s%s"
 		   "key_mgmt=%s%s%s%s%s%s%s%s%s%s%s"
-		   "rsn_capab=%s%s%s%s%s",
+		   "rsn_capab=%s%s%s%s%s%s",
 		   MAC2STR(sta->addr),
 		   sta->proto == 0 ? "OPEN " : "",
 		   sta->proto & WPA_PROTO_WPA ? "WPA " : "",
@@ -210,5 +217,6 @@ skip_rsn_wpa:
 		   sta->rsn_capab & WPA_CAPABILITY_MFPR ? "MFPR " : "",
 		   sta->rsn_capab & WPA_CAPABILITY_MFPC ? "MFPC " : "",
 		   sta->rsn_capab & WPA_CAPABILITY_PEERKEY_ENABLED ?
-		   "PEERKEY " : "");
+		   "PEERKEY " : "",
+		   sta->rsn_capab & WPA_CAPABILITY_OCVC ? "OCVC " : "");
 }

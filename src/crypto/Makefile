@@ -54,6 +54,8 @@ LIB_OBJS= \
 	sha384.o \
 	sha384-prf.o \
 	sha384-internal.o \
+	sha512.o \
+	sha512-prf.o \
 	sha512-internal.o
 
 LIB_OBJS += crypto_internal.o
@@ -62,7 +64,9 @@ LIB_OBJS += crypto_internal-modexp.o
 LIB_OBJS += crypto_internal-rsa.o
 LIB_OBJS += tls_internal.o
 LIB_OBJS += fips_prf_internal.o
+ifndef TEST_FUZZ
 LIB_OBJS += random.o
+endif
 
 
 libcrypto.a: $(LIB_OBJS)

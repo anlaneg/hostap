@@ -81,8 +81,8 @@ def test_discovery(dev):
     if addr1 not in ev0:
         raise Exception("Dev1 not in provision discovery event")
 
-    dev[0].p2p_stop_find
-    dev[1].p2p_stop_find
+    dev[0].p2p_stop_find()
+    dev[1].p2p_stop_find()
 
     if "FAIL" not in dev[0].p2p_find(dev_id="foo"):
         raise Exception("P2P_FIND with invalid dev_id accepted")
@@ -492,11 +492,11 @@ def test_p2p_peer_command(dev):
 
     res0 = dev[0].request("P2P_PEER FIRST")
     peer = res0.splitlines()[0]
-    if peer not in [ addr1, addr2 ]:
+    if peer not in [addr1, addr2]:
         raise Exception("Unexpected P2P_PEER FIRST address")
     res1 = dev[0].request("P2P_PEER NEXT-" + peer)
     peer2 = res1.splitlines()[0]
-    if peer2 not in [ addr1, addr2 ] or peer == peer2:
+    if peer2 not in [addr1, addr2] or peer == peer2:
         raise Exception("Unexpected P2P_PEER NEXT address")
 
     if "FAIL" not in dev[0].request("P2P_PEER NEXT-foo"):
@@ -654,6 +654,22 @@ def test_discovery_long_listen(dev):
     dev[1].p2p_stop_find()
     wpas.p2p_stop_find()
 
+def test_discovery_long_listen2(dev):
+    """Long P2P_LISTEN longer than remain-on-channel time"""
+    with HWSimRadio(use_p2p_device=True) as (radio, iface):
+        wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
+        wpas.interface_add(iface)
+        addr = wpas.p2p_dev_addr()
+        wpas.request("P2P_LISTEN 15")
+
+        # Wait for remain maximum remain-on-channel time to pass
+        time.sleep(7)
+
+        if not dev[0].discover_peer(addr):
+            raise Exception("Device discovery timed out")
+        dev[0].p2p_stop_find()
+        wpas.p2p_stop_find()
+
 def pd_test(dev, addr):
     if not dev.discover_peer(addr, freq=2412):
         raise Exception("Device discovery timed out")
@@ -679,7 +695,7 @@ def run_discovery_while_go(wpas, dev, params):
     terminate_group(wpas, dev[1])
 
     out = run_tshark(os.path.join(params['logdir'], "hwsim0.pcapng"),
-                     "wifi_p2p.public_action.subtype == 8", [ "wlan.da" ])
+                     "wifi_p2p.public_action.subtype == 8", ["wlan.da"])
     da = out.splitlines()
     logger.info("PD Response DAs: " + str(da))
     if len(da) != 3:
@@ -714,7 +730,7 @@ def run_discovery_while_cli(wpas, dev, params):
     terminate_group(dev[1], wpas)
 
     out = run_tshark(os.path.join(params['logdir'], "hwsim0.pcapng"),
-                     "wifi_p2p.public_action.subtype == 8", [ "wlan.da" ])
+                     "wifi_p2p.public_action.subtype == 8", ["wlan.da"])
     da = out.splitlines()
     logger.info("PD Response DAs: " + str(da))
     if len(da) != 3:

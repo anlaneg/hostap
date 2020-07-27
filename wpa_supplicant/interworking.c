@@ -176,7 +176,7 @@ static int cred_with_nai_realm(struct wpa_supplicant *wpa_s)
 			continue;
 		if (!cred->eap_method)
 			return 1;
-		if (cred->realm && cred->roaming_consortium_len == 0)
+		if (cred->realm)
 			return 1;
 	}
 	return 0;
@@ -316,7 +316,7 @@ static int interworking_anqp_send_req(struct wpa_supplicant *wpa_s,
 	if (buf == NULL)
 		return -1;
 
-	res = gas_query_req(wpa_s->gas, bss->bssid, bss->freq, 0, buf,
+	res = gas_query_req(wpa_s->gas, bss->bssid, bss->freq, 0, 0, buf,
 			    interworking_anqp_resp_cb, wpa_s);
 	if (res < 0) {
 		wpa_msg(wpa_s, MSG_DEBUG, "ANQP: Failed to send Query Request");
@@ -946,7 +946,8 @@ static int interworking_set_hs20_params(struct wpa_supplicant *wpa_s,
 	struct wpa_driver_capa capa;
 
 	res = wpa_drv_get_capa(wpa_s, &capa);
-	if (res == 0 && capa.key_mgmt & WPA_DRIVER_CAPA_KEY_MGMT_FT) {
+	if (res == 0 && capa.key_mgmt_iftype[WPA_IF_STATION] &
+	    WPA_DRIVER_CAPA_KEY_MGMT_FT) {
 		key_mgmt = wpa_s->conf->pmf != NO_MGMT_FRAME_PROTECTION ?
 			"WPA-EAP WPA-EAP-SHA256 FT-EAP" :
 			"WPA-EAP FT-EAP";
@@ -958,6 +959,9 @@ static int interworking_set_hs20_params(struct wpa_supplicant *wpa_s,
 			"WPA-EAP WPA-EAP-SHA256" : "WPA-EAP";
 	if (wpa_config_set(ssid, "key_mgmt", key_mgmt, 0) < 0 ||
 	    wpa_config_set(ssid, "proto", "RSN", 0) < 0 ||
+	    wpa_config_set(ssid, "ieee80211w",
+			   wpa_s->conf->pmf == MGMT_FRAME_PROTECTION_REQUIRED ?
+			   "2" : "1", 0) < 0 ||
 	    wpa_config_set(ssid, "pairwise", "CCMP", 0) < 0)
 		return -1;
 	return 0;
@@ -1387,11 +1391,18 @@ static struct wpa_cred * interworking_credentials_available_roaming_consortium(
 		    cred->num_roaming_consortiums == 0)
 			continue;
 
+		if (!cred->eap_method)
+			continue;
+
 		if ((cred->roaming_consortium_len == 0 ||
 		     !roaming_consortium_match(ie, anqp,
 					       cred->roaming_consortium,
 					       cred->roaming_consortium_len)) &&
-		    !cred_roaming_consortiums_match(ie, anqp, cred))
+		    !cred_roaming_consortiums_match(ie, anqp, cred) &&
+		    (cred->required_roaming_consortium_len == 0 ||
+		     !roaming_consortium_match(
+			     ie, anqp, cred->required_roaming_consortium,
+			     cred->required_roaming_consortium_len)))
 			continue;
 
 		if (cred_no_required_oi_match(cred, bss))
@@ -1546,7 +1557,7 @@ static int interworking_set_eap_params(struct wpa_ssid *ssid,
 				  cred->domain_suffix_match) < 0)
 		return -1;
 
-	ssid->eap.ocsp = cred->ocsp;
+	ssid->eap.cert.ocsp = cred->ocsp;
 
 	return 0;
 }
@@ -2254,7 +2265,7 @@ int interworking_home_sp_cred(struct wpa_supplicant *wpa_s,
 			realm++;
 		wpa_msg(wpa_s, MSG_DEBUG,
 			"Interworking: Search for match with SIM/USIM domain %s",
-			realm);
+			realm ? realm : "[NULL]");
 		if (realm &&
 		    domain_name_list_contains(domain_names, realm, 1))
 			return 1;
@@ -2625,7 +2636,6 @@ static void interworking_next_anqp_fetch(struct wpa_supplicant *wpa_s)
 {
 	struct wpa_bss *bss;
 	int found = 0;
-	const u8 *ie;
 
 	wpa_printf(MSG_DEBUG, "Interworking: next_anqp_fetch - "
 		   "fetch_anqp_in_progress=%d fetch_osu_icon_in_progress=%d",
@@ -2648,8 +2658,7 @@ static void interworking_next_anqp_fetch(struct wpa_supplicant *wpa_s)
 	dl_list_for_each(bss, &wpa_s->bss, struct wpa_bss, list) {
 		if (!(bss->caps & IEEE80211_CAP_ESS))
 			continue;
-		ie = wpa_bss_get_ie(bss, WLAN_EID_EXT_CAPAB);
-		if (ie == NULL || ie[1] < 4 || !(ie[5] & 0x80))
+		if (!wpa_bss_ext_capab(bss, WLAN_EXT_CAPAB_INTERWORKING))
 			continue; /* AP does not support Interworking */
 		if (disallowed_bssid(wpa_s, bss->bssid) ||
 		    disallowed_ssid(wpa_s, bss->ssid, bss->ssid_len))
@@ -2670,7 +2679,8 @@ static void interworking_next_anqp_fetch(struct wpa_supplicant *wpa_s)
 			found++;
 			bss->flags |= WPA_BSS_ANQP_FETCH_TRIED;
 			wpa_msg(wpa_s, MSG_INFO, "Starting ANQP fetch for "
-				MACSTR, MAC2STR(bss->bssid));
+				MACSTR " (HESSID " MACSTR ")",
+				MAC2STR(bss->bssid), MAC2STR(bss->hessid));
 			interworking_anqp_send_req(wpa_s, bss);
 			break;
 		}
@@ -2797,7 +2807,8 @@ int anqp_send_req(struct wpa_supplicant *wpa_s, const u8 *dst,
 	if (buf == NULL)
 		return -1;
 
-	res = gas_query_req(wpa_s->gas, dst, freq, 0, buf, anqp_resp_cb, wpa_s);
+	res = gas_query_req(wpa_s->gas, dst, freq, 0, 0, buf, anqp_resp_cb,
+			    wpa_s);
 	if (res < 0) {
 		wpa_msg(wpa_s, MSG_DEBUG, "ANQP: Failed to send Query Request");
 		wpabuf_free(buf);
@@ -2982,7 +2993,7 @@ static void interworking_parse_rx_anqp_resp(struct wpa_supplicant *wpa_s,
 			MAC2STR(sa));
 		anqp_add_extra(wpa_s, anqp, info_id, pos, slen);
 
-		if (!wpa_sm_pmf_enabled(wpa_s->wpa)) {
+		if (!pmf_in_use(wpa_s, sa)) {
 			wpa_printf(MSG_DEBUG,
 				   "ANQP: Ignore Venue URL since PMF was not enabled");
 			break;
@@ -3236,7 +3247,8 @@ int gas_send_request(struct wpa_supplicant *wpa_s, const u8 *dst,
 	} else
 		wpabuf_put_le16(buf, 0);
 
-	res = gas_query_req(wpa_s->gas, dst, freq, 0, buf, gas_resp_cb, wpa_s);
+	res = gas_query_req(wpa_s->gas, dst, freq, 0, 0, buf, gas_resp_cb,
+			    wpa_s);
 	if (res < 0) {
 		wpa_msg(wpa_s, MSG_DEBUG, "GAS: Failed to send Query Request");
 		wpabuf_free(buf);

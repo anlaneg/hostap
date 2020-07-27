@@ -39,6 +39,7 @@ unset RUN_TEST_ARGS
 unset BUILD
 unset BUILD_ARGS
 unset CODECOV
+unset VM
 while [ "$1" != "" ]; do
 	case $1 in
 		-v | --valgrind | valgrind)
@@ -71,6 +72,12 @@ while [ "$1" != "" ]; do
 		-h | --help)
 			usage
 			;;
+		-V | --vm)
+			shift
+			echo "$0: running inside a VM"
+			VM=VM
+			;;
+
 		*)
 			RUN_TEST_ARGS="$RUN_TEST_ARGS$1 "
 			shift
@@ -108,7 +115,7 @@ if [ ! -z "$BUILD" ]; then
     fi
 fi
 
-if ! ./start.sh $VALGRIND $TRACE channels=$NUM_CH; then
+if ! ./start.sh $VM $VALGRIND $TRACE channels=$NUM_CH; then
 	if ! [ -z "$LOGBASEDIR" ] ; then
 		echo "Could not start test environment" > $LOGDIR/run
 	fi
@@ -127,6 +134,11 @@ if [ ! -z "$VALGRIND" ] ; then
     fi
 fi
 
+if tail -100 $LOGDIR/auth_serv | grep -q MEMLEAK; then
+    echo "Mark as failed due to authentication server memory leak"
+    errors=1
+fi
+
 if [ ! -z "$CODECOV" ] ; then
 	lcov -q --capture --directory ../../wpa_supplicant --output-file $LOGDIR/wpas_lcov.info
 	genhtml -q $LOGDIR/wpas_lcov.info --output-directory $LOGDIR/wpas_lcov
@@ -135,7 +147,9 @@ if [ ! -z "$CODECOV" ] ; then
 fi
 
 if [ $errors -gt 0 ]; then
-    tar czf /tmp/hwsim-tests-$DATE-FAILED$SUFFIX.tar.gz $LOGDIR/
+    if [ -z $VM ]; then
+	tar czf /tmp/hwsim-tests-$DATE-FAILED$SUFFIX.tar.gz $LOGDIR/
+    fi
     exit 1
 fi
 

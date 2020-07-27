@@ -95,8 +95,7 @@ void hs20_configure_frame_filters(struct wpa_supplicant *wpa_s)
 		return;
 	}
 
-	/* Check if Proxy ARP is enabled (2nd byte in the IE) */
-	if (ext_capa[3] & BIT(4))
+	if (wpa_bss_ext_capab(bss, WLAN_EXT_CAPAB_PROXY_ARP))
 		filter |= WPA_DATA_FRAME_FILTER_FLAG_ARP |
 			WPA_DATA_FRAME_FILTER_FLAG_NA;
 
@@ -104,15 +103,22 @@ void hs20_configure_frame_filters(struct wpa_supplicant *wpa_s)
 }
 
 
-void wpas_hs20_add_indication(struct wpabuf *buf, int pps_mo_id)
+void wpas_hs20_add_indication(struct wpabuf *buf, int pps_mo_id, int ap_release)
 {
+	int release;
 	u8 conf;
+
+	release = (HS20_VERSION >> 4) + 1;
+	if (ap_release > 0 && release > ap_release)
+		release = ap_release;
+	if (release < 2)
+		pps_mo_id = -1;
 
 	wpabuf_put_u8(buf, WLAN_EID_VENDOR_SPECIFIC);
 	wpabuf_put_u8(buf, pps_mo_id >= 0 ? 7 : 5);
 	wpabuf_put_be24(buf, OUI_WFA);
 	wpabuf_put_u8(buf, HS20_INDICATION_OUI_TYPE);
-	conf = HS20_VERSION;
+	conf = (release - 1) << 4;
 	if (pps_mo_id >= 0)
 		conf |= HS20_PPS_MO_ID_PRESENT;
 	wpabuf_put_u8(buf, conf);
@@ -134,6 +140,21 @@ void wpas_hs20_add_roam_cons_sel(struct wpabuf *buf,
 	wpabuf_put_u8(buf, HS20_ROAMING_CONS_SEL_OUI_TYPE);
 	wpabuf_put_data(buf, ssid->roaming_consortium_selection,
 			ssid->roaming_consortium_selection_len);
+}
+
+
+int get_hs20_version(struct wpa_bss *bss)
+{
+	const u8 *ie;
+
+	if (!bss)
+		return 0;
+
+	ie = wpa_bss_get_vendor_ie(bss, HS20_IE_VENDOR_TYPE);
+	if (!ie || ie[1] < 5)
+		return 0;
+
+	return ((ie[6] >> 4) & 0x0f) + 1;
 }
 
 
@@ -267,7 +288,8 @@ int hs20_anqp_send_req(struct wpa_supplicant *wpa_s, const u8 *dst, u32 stypes,
 	if (buf == NULL)
 		return -1;
 
-	res = gas_query_req(wpa_s->gas, dst, freq, 0, buf, anqp_resp_cb, wpa_s);
+	res = gas_query_req(wpa_s->gas, dst, freq, 0, 0, buf, anqp_resp_cb,
+			    wpa_s);
 	if (res < 0) {
 		wpa_printf(MSG_DEBUG, "ANQP: Failed to send Query Request");
 		wpabuf_free(buf);
@@ -319,7 +341,7 @@ int hs20_get_icon(struct wpa_supplicant *wpa_s, const u8 *bssid,
 {
 	struct icon_entry *icon;
 	size_t out_size;
-	unsigned char *b64;
+	char *b64;
 	size_t b64_size;
 	int reply_size;
 
@@ -410,7 +432,7 @@ static void hs20_set_osu_access_permission(const char *osu_dir,
 		return;
 	}
 
-	if (chown(fname, statbuf.st_uid, statbuf.st_gid) < 0) {
+	if (lchown(fname, statbuf.st_uid, statbuf.st_gid) < 0) {
 		wpa_printf(MSG_WARNING, "Cannot change the ownership for %s",
 			   fname);
 	}

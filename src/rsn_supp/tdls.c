@@ -178,7 +178,7 @@ static u8 * wpa_add_ie(u8 *pos, const u8 *ie, size_t ie_len)
 static int wpa_tdls_del_key(struct wpa_sm *sm, struct wpa_tdls_peer *peer)
 {
 	if (wpa_sm_set_key(sm, WPA_ALG_NONE, peer->addr,
-			   0, 0, NULL, 0, NULL, 0) < 0) {
+			   0, 0, NULL, 0, NULL, 0, KEY_FLAG_PAIRWISE) < 0) {
 		wpa_printf(MSG_WARNING, "TDLS: Failed to delete TPK-TK from "
 			   "the driver");
 		return -1;
@@ -227,8 +227,9 @@ static int wpa_tdls_set_key(struct wpa_sm *sm, struct wpa_tdls_peer *peer)
 
 	wpa_printf(MSG_DEBUG, "TDLS: Configure pairwise key for peer " MACSTR,
 		   MAC2STR(peer->addr));
-	if (wpa_sm_set_key(sm, alg, peer->addr, -1, 1,
-			   rsc, sizeof(rsc), peer->tpk.tk, key_len) < 0) {
+	if (wpa_sm_set_key(sm, alg, peer->addr, 0, 1, rsc, sizeof(rsc),
+			   peer->tpk.tk, key_len,
+			   KEY_FLAG_PAIRWISE_RX_TX) < 0) {
 		wpa_printf(MSG_WARNING, "TDLS: Failed to set TPK to the "
 			   "driver");
 		return -1;
@@ -1594,7 +1595,7 @@ static int copy_supp_rates(const struct wpa_eapol_ie_parse *kde,
 		peer->supp_rates, sizeof(peer->supp_rates),
 		kde->supp_rates + 2, kde->supp_rates_len - 2,
 		kde->ext_supp_rates ? kde->ext_supp_rates + 2 : NULL,
-		kde->ext_supp_rates_len - 2);
+		kde->ext_supp_rates ? kde->ext_supp_rates_len - 2 : 0);
 	return 0;
 }
 
@@ -2159,11 +2160,11 @@ static int wpa_tdls_enable_link(struct wpa_sm *sm, struct wpa_tdls_peer *peer)
 		eloop_register_timeout(lifetime, 0, wpa_tdls_tpk_timeout,
 				       sm, peer);
 #ifdef CONFIG_TDLS_TESTING
-	if (tdls_testing & TDLS_TESTING_NO_TPK_EXPIRATION) {
-		wpa_printf(MSG_DEBUG, "TDLS: Testing - disable TPK "
-			   "expiration");
-		eloop_cancel_timeout(wpa_tdls_tpk_timeout, sm, peer);
-	}
+		if (tdls_testing & TDLS_TESTING_NO_TPK_EXPIRATION) {
+			wpa_printf(MSG_DEBUG,
+				   "TDLS: Testing - disable TPK expiration");
+			eloop_cancel_timeout(wpa_tdls_tpk_timeout, sm, peer);
+		}
 #endif /* CONFIG_TDLS_TESTING */
 	}
 

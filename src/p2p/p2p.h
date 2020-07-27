@@ -36,7 +36,7 @@
 /**
  * P2P_MAX_REG_CLASS_CHANNELS - Maximum number of channels per regulatory class
  */
-#define P2P_MAX_REG_CLASS_CHANNELS 20
+#define P2P_MAX_REG_CLASS_CHANNELS 60
 
 /**
  * struct p2p_channels - List of supported channels
@@ -99,9 +99,16 @@ struct p2p_go_neg_results {
 
 	int vht;
 
+	int edmg;
+
 	u8 max_oper_chwidth;
 
 	unsigned int vht_center_freq2;
+
+	/**
+	 * he - Indicates if IEEE 802.11ax HE is enabled
+	 */
+	int he;
 
 	/**
 	 * ssid - SSID of the group
@@ -660,6 +667,8 @@ struct p2p_config {
 	 * @buf: Frame body (starting from Category field)
 	 * @len: Length of buf in octets
 	 * @wait_time: How many msec to wait for a response frame
+	 * @scheduled: Return value indicating whether the transmissions was
+	 *	scheduled to happen once the radio is available
 	 * Returns: 0 on success, -1 on failure
 	 *
 	 * The Action frame may not be transmitted immediately and the status
@@ -670,7 +679,7 @@ struct p2p_config {
 	 */
 	int (*send_action)(void *ctx, unsigned int freq, const u8 *dst,
 			   const u8 *src, const u8 *bssid, const u8 *buf,
-			   size_t len, unsigned int wait_time);
+			   size_t len, unsigned int wait_time, int *scheduled);
 
 	/**
 	 * send_action_done - Notify that Action frame sequence was completed
@@ -2005,6 +2014,8 @@ void p2p_set_managed_oper(struct p2p_data *p2p, int enabled);
  * @p2p: P2P config
  * @op_class: Selected operating class
  * @op_channel: Selected social channel
+ * @avoid_list: Channel ranges to try to avoid or %NULL
+ * @disallow_list: Channel ranges to discard or %NULL
  * Returns: 0 on success, -1 on failure
  *
  * This function is used before p2p_init is called. A random social channel
@@ -2012,7 +2023,9 @@ void p2p_set_managed_oper(struct p2p_data *p2p, int enabled);
  * returned on success.
  */
 int p2p_config_get_random_social(struct p2p_config *p2p, u8 *op_class,
-				 u8 *op_channel);
+				 u8 *op_channel,
+				 struct wpa_freq_range_list *avoid_list,
+				 struct wpa_freq_range_list *disallow_list);
 
 int p2p_set_listen_channel(struct p2p_data *p2p, u8 reg_class, u8 channel,
 			   u8 forced);

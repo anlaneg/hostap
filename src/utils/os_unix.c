@@ -1,6 +1,6 @@
 /*
  * OS specific functions for UNIX/POSIX systems
- * Copyright (c) 2005-2009, Jouni Malinen <j@w1.fi>
+ * Copyright (c) 2005-2019, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -49,10 +49,16 @@ struct os_alloc_trace {
 
 void os_sleep(os_time_t sec, os_time_t usec)
 {
+#if defined(_POSIX_C_SOURCE) && (_POSIX_C_SOURCE >= 200809L)
+	const struct timespec req = { sec, usec * 1000 };
+
+	nanosleep(&req, NULL);
+#else
 	if (sec)
 		sleep(sec);
 	if (usec)
 		usleep(usec);
+#endif
 }
 
 
@@ -250,6 +256,13 @@ void os_daemonize_terminate(const char *pid_file)
 //生成一段长度为len的随机值（其值填充到buf中，自/dev/urandom中读取）
 int os_get_random(unsigned char *buf, size_t len)
 {
+#ifdef TEST_FUZZ
+	size_t i;
+
+	for (i = 0; i < len; i++)
+		buf[i] = i & 0xff;
+	return 0;
+#else /* TEST_FUZZ */
 	FILE *f;
 	size_t rc;
 
@@ -266,6 +279,7 @@ int os_get_random(unsigned char *buf, size_t len)
 	fclose(f);
 
 	return rc != len ? -1 : 0;
+#endif /* TEST_FUZZ */
 }
 
 
@@ -323,6 +337,8 @@ char * os_rel2abs_path(const char *rel_path)
 
 int os_program_init(void)
 {
+	unsigned int seed;
+
 #ifdef ANDROID
 	/*
 	 * We ignore errors here since errors are normal if we
@@ -350,6 +366,9 @@ int os_program_init(void)
 	cap.inheritable = 0;
 	capset(&header, &cap);
 #endif /* ANDROID */
+
+	if (os_get_random((unsigned char *) &seed, sizeof(seed)) == 0)
+		srandom(seed);
 
 	return 0;
 }
@@ -518,7 +537,7 @@ void * os_memdup(const void *src, size_t len)
 {
 	void *r = os_malloc(len);
 
-	if (r)
+	if (r && src)
 		os_memcpy(r, src, len);
 	return r;
 }

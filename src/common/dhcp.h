@@ -39,7 +39,7 @@ struct dhcp_data {
 } STRUCT_PACKED;
 
 struct bootp_pkt {
-	struct iphdr iph;//ip头
+	struct ip iph;//ip头
 	struct udphdr udph;//udp头
 	u8 op;
 	u8 htype;

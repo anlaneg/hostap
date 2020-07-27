@@ -31,10 +31,10 @@ struct wpa_sm {
 	u8 request_counter[WPA_REPLAY_COUNTER_LEN];
 	struct wpa_gtk gtk;
 	struct wpa_gtk gtk_wnm_sleep;
-#ifdef CONFIG_IEEE80211W
 	struct wpa_igtk igtk;
 	struct wpa_igtk igtk_wnm_sleep;
-#endif /* CONFIG_IEEE80211W */
+	struct wpa_bigtk bigtk;
+	struct wpa_bigtk bigtk_wnm_sleep;
 
 	struct eapol_sm *eapol; /* EAPOL state machine from upper level code */
 
@@ -63,8 +63,15 @@ struct wpa_sm {
 	u8 ssid[32];
 	size_t ssid_len;
 	int wpa_ptk_rekey;
+	int wpa_deny_ptk0_rekey:1;
 	int p2p;
 	int wpa_rsc_relaxation;
+	int owe_ptk_workaround;
+	int beacon_prot;
+	int ext_key_id; /* whether Extended Key ID is enabled */
+	int use_ext_key_id; /* whether Extended Key ID has been detected
+			     * to be used */
+	int keyidx_active; /* Key ID for the active TK */
 
 	u8 own_addr[ETH_ALEN];
 	const char *ifname;
@@ -86,11 +93,16 @@ struct wpa_sm {
 
 	int rsn_enabled; /* Whether RSN is enabled in configuration */
 	int mfp; /* 0 = disabled, 1 = optional, 2 = mandatory */
+	int ocv; /* Operating Channel Validation */
+	int sae_pwe; /* SAE PWE generation options */
+	int sae_pk; /* whether SAE-PK is used */
 
 	u8 *assoc_wpa_ie; /* Own WPA/RSN IE from (Re)AssocReq */
 	size_t assoc_wpa_ie_len;
-	u8 *ap_wpa_ie, *ap_rsn_ie;
-	size_t ap_wpa_ie_len, ap_rsn_ie_len;
+	u8 *assoc_rsnxe; /* Own RSNXE from (Re)AssocReq */
+	size_t assoc_rsnxe_len;
+	u8 *ap_wpa_ie, *ap_rsn_ie, *ap_rsnxe;
+	size_t ap_wpa_ie_len, ap_rsn_ie_len, ap_rsnxe_len;
 
 #ifdef CONFIG_TDLS
 	struct wpa_tdls_peer *tdls;
@@ -125,8 +137,9 @@ struct wpa_sm {
 	u8 r0kh_id[FT_R0KH_ID_MAX_LEN];
 	size_t r0kh_id_len;
 	u8 r1kh_id[FT_R1KH_ID_LEN];
-	int ft_completed;
-	int ft_reassoc_completed;
+	unsigned int ft_completed:1;
+	unsigned int ft_reassoc_completed:1;
+	unsigned int ft_protocol:1;
 	int over_the_ds_in_progress;
 	u8 target_ap[ETH_ALEN]; /* over-the-DS target AP */
 	int set_ptk_after_assoc;
@@ -141,6 +154,8 @@ struct wpa_sm {
 
 #ifdef CONFIG_TESTING_OPTIONS
 	struct wpabuf *test_assoc_ie;
+	int ft_rsnxe_used;
+	unsigned int oci_freq_override_eapol;
 #endif /* CONFIG_TESTING_OPTIONS */
 
 #ifdef CONFIG_FILS
@@ -167,6 +182,11 @@ struct wpa_sm {
 	struct crypto_ecdh *owe_ecdh;
 	u16 owe_group;
 #endif /* CONFIG_OWE */
+
+#ifdef CONFIG_DPP2
+	struct wpabuf *dpp_z;
+	int dpp_pfs;
+#endif /* CONFIG_DPP2 */
 };
 
 
@@ -182,7 +202,7 @@ static inline enum wpa_states wpa_sm_get_state(struct wpa_sm *sm)
 	return sm->ctx->get_state(sm->ctx->ctx);
 }
 
-static inline void wpa_sm_deauthenticate(struct wpa_sm *sm, int reason_code)
+static inline void wpa_sm_deauthenticate(struct wpa_sm *sm, u16 reason_code)
 {
 	WPA_ASSERT(sm->ctx->deauthenticate);
 	sm->ctx->deauthenticate(sm->ctx->ctx, reason_code);
@@ -191,11 +211,18 @@ static inline void wpa_sm_deauthenticate(struct wpa_sm *sm, int reason_code)
 static inline int wpa_sm_set_key(struct wpa_sm *sm, enum wpa_alg alg,
 				 const u8 *addr, int key_idx, int set_tx,
 				 const u8 *seq, size_t seq_len,
-				 const u8 *key, size_t key_len)
+				 const u8 *key, size_t key_len,
+				 enum key_flag key_flag)
 {
 	WPA_ASSERT(sm->ctx->set_key);
 	return sm->ctx->set_key(sm->ctx->ctx, alg, addr, key_idx, set_tx,
-				seq, seq_len, key, key_len);
+				seq, seq_len, key, key_len, key_flag);
+}
+
+static inline void wpa_sm_reconnect(struct wpa_sm *sm)
+{
+	WPA_ASSERT(sm->ctx->reconnect);
+	sm->ctx->reconnect(sm->ctx->ctx);
 }
 
 static inline void * wpa_sm_get_network_ctx(struct wpa_sm *sm)
@@ -241,11 +268,13 @@ static inline u8 * wpa_sm_alloc_eapol(struct wpa_sm *sm, u8 type,
 static inline int wpa_sm_add_pmkid(struct wpa_sm *sm, void *network_ctx,
 				   const u8 *bssid, const u8 *pmkid,
 				   const u8 *cache_id, const u8 *pmk,
-				   size_t pmk_len)
+				   size_t pmk_len, u32 pmk_lifetime,
+				   u8 pmk_reauth_threshold, int akmp)
 {
 	WPA_ASSERT(sm->ctx->add_pmkid);
 	return sm->ctx->add_pmkid(sm->ctx->ctx, network_ctx, bssid, pmkid,
-				  cache_id, pmk, pmk_len);
+				  cache_id, pmk, pmk_len, pmk_lifetime,
+				  pmk_reauth_threshold, akmp);
 }
 
 static inline int wpa_sm_remove_pmkid(struct wpa_sm *sm, void *network_ctx,
@@ -393,6 +422,20 @@ static inline void wpa_sm_fils_hlp_rx(struct wpa_sm *sm,
 {
 	if (sm->ctx->fils_hlp_rx)
 		sm->ctx->fils_hlp_rx(sm->ctx->ctx, dst, src, pkt, pkt_len);
+}
+
+static inline int wpa_sm_channel_info(struct wpa_sm *sm,
+				      struct wpa_channel_info *ci)
+{
+	if (!sm->ctx->channel_info)
+		return -1;
+	return sm->ctx->channel_info(sm->ctx->ctx, ci);
+}
+
+static inline void wpa_sm_transition_disable(struct wpa_sm *sm, u8 bitmap)
+{
+	if (sm->ctx->transition_disable)
+		sm->ctx->transition_disable(sm->ctx->ctx, bitmap);
 }
 
 

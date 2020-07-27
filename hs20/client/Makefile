@@ -8,11 +8,16 @@ ifndef LDO
 LDO=$(CC)
 endif
 
+ifeq ($(QUIET), 1)
+Q=@
+E=true
+else
 Q=@
 E=echo
 ifeq ($(V), 1)
 Q=
 E=true
+endif
 endif
 
 ifndef CFLAGS
@@ -25,8 +30,17 @@ CFLAGS += -I../../src
 
 ifndef CONFIG_NO_BROWSER
 ifndef CONFIG_BROWSER_SYSTEM
+TEST_WK := $(shell pkg-config --silence-errors --cflags webkitgtk-3.0)
+ifeq ($(TEST_WK),)
+# Try webkit2
+GTKCFLAGS := $(shell pkg-config --cflags gtk+-3.0 webkit2gtk-4.0)
+GTKLIBS := $(shell pkg-config --libs gtk+-3.0 webkit2gtk-4.0)
+CFLAGS += -DUSE_WEBKIT2
+else
 GTKCFLAGS := $(shell pkg-config --cflags gtk+-3.0 webkitgtk-3.0)
 GTKLIBS := $(shell pkg-config --libs gtk+-3.0 webkitgtk-3.0)
+endif
+
 CFLAGS += $(GTKCFLAGS)
 LIBS += $(GTKLIBS)
 endif
