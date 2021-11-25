@@ -68,7 +68,7 @@ static void hostapd_interface_setup_failure_handler(void *eloop_ctx,
 						    void *timeout_ctx);
 
 
-//遍历每个interface,并执行回调cb
+//遍历每个iface,并执行回调cb
 int hostapd_for_each_interface(struct hapd_interfaces *interfaces,
 			       int (*cb)(struct hostapd_iface *iface,
 					 void *ctx), void *ctx)

@@ -52,7 +52,7 @@ struct hapd_interfaces {
 	struct hostapd_config * (*config_read_cb)(const char *config_fname);
 	int (*ctrl_iface_init)(struct hostapd_data *hapd);
 	void (*ctrl_iface_deinit)(struct hostapd_data *hapd);
-	//遍历每个interface,并执行回调cb
+	//遍历每个iface,并执行回调cb
 	int (*for_each_interface)(struct hapd_interfaces *interfaces,
 				  int (*cb)(struct hostapd_iface *iface,
 					    void *ctx), void *ctx);
