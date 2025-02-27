@@ -713,6 +713,7 @@ int is_hex(const u8 *data, size_t len)
 }
 
 
+/*输出的字符必须不得小于32或者等于127*/
 int has_ctrl_char(const u8 *data, size_t len)
 {
 	size_t i;

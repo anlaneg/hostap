@@ -1776,8 +1776,8 @@ int hmac_sha512(const u8 *key, size_t key_len, const u8 *data,
 #endif /* OpenSSL version >= 3.0 */
 
 
-int pbkdf2_sha1(const char *passphrase, const u8 *ssid, size_t ssid_len,
-		int iterations, u8 *buf, size_t buflen)
+int pbkdf2_sha1(const char *passphrase/*针对SSID的密码*/, const u8 *ssid/*要连接的SSID*/, size_t ssid_len,
+		int iterations/*次数*/, u8 *buf, size_t buflen)
 {
 	if (PKCS5_PBKDF2_HMAC_SHA1(passphrase, os_strlen(passphrase), ssid,
 				   ssid_len, iterations, buflen, buf) != 1)

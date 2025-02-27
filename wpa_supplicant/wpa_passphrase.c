@@ -28,13 +28,14 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	ssid = argv[1];
+	ssid = argv[1];/*提供连接用的SSID*/
 
 	if (argc > 2) {
-		passphrase = argv[2];
+		passphrase = argv[2];/*连接用的密码*/
 	} else {
 		bool ctrl_echo;
 
+		/*要么从stdin上读取*/
 		fprintf(stderr, "# reading passphrase from stdin\n");
 		if (tcgetattr(STDIN_FILENO, &term) < 0) {
 			perror("tcgetattr");
@@ -69,14 +70,18 @@ int main(int argc, char *argv[])
 
 	len = os_strlen(passphrase);
 	if (len < 8 || len > 63) {
+		/*密码必须大于8且小于63*/
 		fprintf(stderr, "Passphrase must be 8..63 characters\n");
 		return 1;
 	}
+
+	/*排除掉不支持的字符*/
 	if (has_ctrl_char((u8 *) passphrase, len)) {
 		fprintf(stderr, "Invalid passphrase character\n");
 		return 1;
 	}
 
+	/*恰好走src/crypto/crypto_openssl.c文件*/
 	if (pbkdf2_sha1(passphrase, (u8 *) ssid, os_strlen(ssid), 4096, psk, 32)
 	    != 0) {
 		fprintf(stderr, "Error in pbkdf2_sha1()\n");
