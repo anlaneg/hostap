@@ -1,12 +1,5 @@
-*.a
-*.o
-*.d
-*.gcno
-*.gcda
-*.gcov
 *.pyc
 *~
-.config
 tests/hwsim/logs
 tests/remote/logs
 wpaspy/build
@@ -37,3 +30,8 @@ wlantest/wlantest_cli
 .settings/
 **/parallel-vm.log
 .autotools
+tags
+build/
+# clangd commands and cache
+compile_commands.json
+.cache

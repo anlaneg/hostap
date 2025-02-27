@@ -20,7 +20,7 @@ except ImportError:
 
 import hwsim_utils
 import hostapd
-from utils import iface_is_in_bridge, HwsimSkip, alloc_fail
+from utils import *
 import os
 from tshark import run_tshark
 
@@ -261,6 +261,7 @@ def generic_ap_vlan_wpa2_radius_id_change(dev, apdev, tagged):
                    password_hex="0123456789abcdef0123456789abcdef",
                    scan_freq="2412")
     hapd.wait_sta()
+    time.sleep(0.1)
     if tagged:
         hwsim_utils.run_connectivity_test(dev[0], hapd, 0, ifname1="wlan0.1",
                                           ifname2="brvlan1")
@@ -289,6 +290,10 @@ def generic_ap_vlan_wpa2_radius_id_change(dev, apdev, tagged):
         raise Exception("No VLAN ID in STA info")
     if (not tagged) and (sta['vlan_id'] != '2'):
         raise Exception("Unexpected VLAN ID: " + sta['vlan_id'])
+    ev = hapd.wait_event(["CTRL-EVENT-EAP-SUCCESS2"], timeout=1)
+    if ev is None:
+        raise Exception("EAP reauthentication timed out (AP)")
+    time.sleep(0.1)
     if tagged:
         hwsim_utils.run_connectivity_test(dev[0], hapd, 0, ifname1="wlan0.2",
                                           ifname2="brvlan2")
@@ -313,6 +318,9 @@ def generic_ap_vlan_wpa2_radius_id_change(dev, apdev, tagged):
     state = dev[0].get_status_field('wpa_state')
     if state != "COMPLETED":
         raise Exception("Unexpected state after reauth: " + state)
+    ev = hapd.wait_event(["CTRL-EVENT-EAP-SUCCESS2"], timeout=1)
+    if ev is None:
+        raise Exception("EAP reauthentication timed out (AP)")
     sta = hapd.get_sta(dev[0].own_addr())
     if 'vlan_id' not in sta:
         raise Exception("No VLAN ID in STA info")
@@ -330,6 +338,7 @@ def generic_ap_vlan_wpa2_radius_id_change(dev, apdev, tagged):
         # It is possible for new bridge setup to not be ready immediately, so
         # try again to avoid reporting issues related to that.
         logger.info("First VLAN-ID 1 data test failed - try again")
+        time.sleep(0.1)
         if tagged:
             hwsim_utils.run_connectivity_test(dev[0], hapd, 0,
                                               ifname1="wlan0.1",
@@ -378,41 +387,41 @@ def test_ap_vlan_tagged(dev, apdev):
         os.unlink(filename)
 
 def ap_vlan_iface_cleanup_multibss_cleanup():
-    subprocess.call(['ifconfig', 'dummy0', 'down'],
+    subprocess.call(['ifconfig', 'stub0', 'down'],
                     stderr=open('/dev/null', 'w'))
-    ifnames = ['wlan3.1', 'wlan3.2', 'wlan3-2.1', 'wlan3-2.2', 'dummy0.2',
-               'dummy0.1', 'dummy0', 'brvlan1', 'brvlan2']
+    ifnames = ['wlan3.1', 'wlan3.2', 'wlan3-2.1', 'wlan3-2.2', 'stub0.2',
+               'stub0.1', 'stub0', 'brvlan1', 'brvlan2']
     for ifname in ifnames:
         subprocess.call(['ip', 'link', 'del', ifname],
                         stderr=open('/dev/null', 'w'))
 
 def ap_vlan_iface_test_and_prepare_environ():
     ifaces = netifaces.interfaces()
-    if "dummy0" in ifaces:
-        raise Exception("dummy0 already exists before")
+    if "stub0" in ifaces:
+        raise Exception("stub0 already exists before")
     ifaces = netifaces.interfaces()
-    if "dummy0.1" in ifaces:
-        raise Exception("dummy0.1 already exists before")
+    if "stub0.1" in ifaces:
+        raise Exception("stub0.1 already exists before")
 
-    subprocess.call(['ip', 'link', 'add', 'dummy0', 'type', 'dummy'])
-    subprocess.call(['ifconfig', 'dummy0', 'up'])
+    subprocess.call(['ip', 'link', 'add', 'stub0', 'type', 'dummy'])
+    subprocess.call(['ifconfig', 'stub0', 'up'])
 
     ifaces = netifaces.interfaces()
-    if "dummy0" not in ifaces:
-        raise HwsimSkip("failed to add dummy0 - missing kernel config DUMMY ?")
+    if "stub0" not in ifaces:
+        raise HwsimSkip("failed to add stub0 - missing kernel config DUMMY ?")
 
-    subprocess.call(['ip', 'link', 'add', 'link', 'dummy0', 'name', 'dummy0.1',
+    subprocess.call(['ip', 'link', 'add', 'link', 'stub0', 'name', 'stub0.1',
                      'type', 'vlan', 'id', '1'])
 
     ifaces = netifaces.interfaces()
-    if "dummy0.1" not in ifaces:
-        raise HwsimSkip("failed to add dummy0.1 - missing kernel config VLAN_8021Q ?")
+    if "stub0.1" not in ifaces:
+        raise HwsimSkip("failed to add stub0.1 - missing kernel config VLAN_8021Q ?")
 
-    subprocess.call(['ip', 'link', 'del', 'dummy0.1'])
+    subprocess.call(['ip', 'link', 'del', 'stub0.1'])
 
     ifaces = netifaces.interfaces()
-    if "dummy0.1" in ifaces:
-        raise Exception("dummy0.1 was not removed before testing")
+    if "stub0.1" in ifaces:
+        raise Exception("stub0.1 was not removed before testing")
 
 def test_ap_vlan_iface_cleanup_multibss(dev, apdev):
     """AP VLAN operation in multi-BSS multi-VLAN case"""
@@ -464,8 +473,8 @@ def ap_vlan_iface_cleanup_multibss(dev, apdev, cfgfile):
             raise Exception("bridge brvlan1 was not created")
 
         hwsim_utils.test_connectivity_iface(dev[0], hapd, "brvlan1")
-        if not iface_is_in_bridge("brvlan1", "dummy0.1"):
-            raise Exception("dummy0.1 not in brvlan1")
+        if not iface_is_in_bridge("brvlan1", "stub0.1"):
+            raise Exception("stub0.1 not in brvlan1")
 
         dev[1].connect("bss-2", key_mgmt="WPA-EAP", eap="PAX",
                        identity="vlan1",
@@ -474,8 +483,8 @@ def ap_vlan_iface_cleanup_multibss(dev, apdev, cfgfile):
 
         hapd1.wait_sta()
         hwsim_utils.test_connectivity_iface(dev[1], hapd1, "brvlan1")
-        if not iface_is_in_bridge("brvlan1", "dummy0.1"):
-            raise Exception("dummy0.1 not in brvlan1")
+        if not iface_is_in_bridge("brvlan1", "stub0.1"):
+            raise Exception("stub0.1 not in brvlan1")
 
         authserv.disable()
         authserv.set('eap_user_file', "auth_serv/eap_user_vlan.conf")
@@ -502,13 +511,13 @@ def ap_vlan_iface_cleanup_multibss(dev, apdev, cfgfile):
         hwsim_utils.test_connectivity_iface(dev[0], hapd, "brvlan2",
                                             max_tries=5)
 
-        if not iface_is_in_bridge("brvlan2", "dummy0.2"):
-            raise Exception("dummy0.2 not in brvlan2")
+        if not iface_is_in_bridge("brvlan2", "stub0.2"):
+            raise Exception("stub0.2 not in brvlan2")
 
         logger.info("test wlan1 == VLAN 1")
         hwsim_utils.test_connectivity_iface(dev[1], hapd1, "brvlan1")
-        if not iface_is_in_bridge("brvlan1", "dummy0.1"):
-            raise Exception("dummy0.1 not in brvlan1")
+        if not iface_is_in_bridge("brvlan1", "stub0.1"):
+            raise Exception("stub0.1 not in brvlan1")
 
         logger.info("wlan1 -> VLAN 2")
 
@@ -530,8 +539,8 @@ def ap_vlan_iface_cleanup_multibss(dev, apdev, cfgfile):
         logger.info("test wlan0 == VLAN 2")
         hwsim_utils.test_connectivity_iface(dev[0], hapd, "brvlan2")
 
-        if not iface_is_in_bridge("brvlan2", "dummy0.2"):
-            raise Exception("dummy0.2 not in brvlan2")
+        if not iface_is_in_bridge("brvlan2", "stub0.2"):
+            raise Exception("stub0.2 not in brvlan2")
 
         ifaces = netifaces.interfaces()
         if "brvlan1" in ifaces:
@@ -593,6 +602,7 @@ def test_ap_vlan_without_station(dev, apdev, p):
         time.sleep(.1)
 
         dev[0].connect("test-vlan", psk="12345678x", scan_freq="2412")
+        hapd.wait_sta()
 
         # inject some traffic
         sa = hapd.own_addr()
@@ -634,7 +644,12 @@ def test_ap_vlan_without_station(dev, apdev, p):
                 raise Exception("second frame not observed")
             state = 1
             for l in lines:
-                is_protected = int(l, 16)
+                if l == "True":
+                    is_protected = 1
+                elif l == "False":
+                    is_protected = 0
+                else:
+                    is_protected = int(l, 16)
                 if is_protected != 1:
                     state = 0
             if state != 1:
@@ -782,18 +797,29 @@ def test_ap_vlan_psk(dev, apdev, params):
     hwsim_utils.test_connectivity_iface(dev[1], hapd, "brvlan2")
     hwsim_utils.test_connectivity_iface(dev[2], hapd, "brvlan3")
 
-def test_ap_vlan_sae(dev, apdev, params):
-    """AP VLAN based on SAE Password Identifier"""
     for i in range(3):
-        if "SAE" not in dev[i].get_capability("auth_alg"):
-            raise HwsimSkip("SAE not supported")
+        sta = hapd.get_sta(dev[i].own_addr())
+        if not (sta and "vlan_id" in sta):
+            raise Exception("VLAN information not in STA output")
+        vlan_id = int(sta["vlan_id"])
+        if vlan_id != i + 1:
+            raise Exception("Unexpected vlan_id %d for dev[%d]" % (vlan_id, i))
+
+def start_ap_vlan_sae(apdev):
     params = hostapd.wpa2_params(ssid="test-sae-vlan")
     params['wpa_key_mgmt'] = 'SAE'
     params['sae_password'] = ['pw1|vlanid=1|id=id1',
                               'pw2|mac=ff:ff:ff:ff:ff:ff|vlanid=2|id=id2',
                               'pw3|vlanid=3|id=id3']
     params['dynamic_vlan'] = "1"
-    hapd = hostapd.add_ap(apdev[0], params)
+    params['wpa_group_rekey'] = '10'
+    return hostapd.add_ap(apdev, params)
+
+def test_ap_vlan_sae(dev, apdev, params):
+    """AP VLAN based on SAE Password Identifier"""
+    for i in range(3):
+        check_sae_capab(dev[i])
+    hapd = start_ap_vlan_sae(apdev[0])
 
     for i in range(3):
         dev[i].request("SET sae_groups ")
@@ -805,3 +831,50 @@ def test_ap_vlan_sae(dev, apdev, params):
     hwsim_utils.test_connectivity_iface(dev[0], hapd, "brvlan1")
     hwsim_utils.test_connectivity_iface(dev[1], hapd, "brvlan2")
     hwsim_utils.test_connectivity_iface(dev[2], hapd, "brvlan3")
+
+    for i in range(3):
+        sta = hapd.get_sta(dev[i].own_addr())
+        if not (sta and "vlan_id" in sta):
+            raise Exception("VLAN information not in STA output")
+        vlan_id = int(sta["vlan_id"])
+        if vlan_id != i + 1:
+            raise Exception("Unexpected vlan_id %d for dev[%d]" % (vlan_id, i))
+
+        ev = dev[i].wait_event(["RSN: Group rekeying completed"], timeout=11)
+        if ev is None:
+            raise Exception("GTK rekey timed out")
+
+    time.sleep(1)
+
+    hwsim_utils.test_connectivity_iface(dev[0], hapd, "brvlan1")
+    hwsim_utils.test_connectivity_iface(dev[1], hapd, "brvlan2")
+    hwsim_utils.test_connectivity_iface(dev[2], hapd, "brvlan3")
+
+def test_ap_vlan_sae_group_rekey(dev, apdev, params):
+    """AP VLAN and group rekeying"""
+    check_sae_capab(dev[0])
+    hapd = start_ap_vlan_sae(apdev[0])
+
+    dev[0].set("sae_groups", "")
+    dev[0].connect("test-sae-vlan", sae_password="pw1",
+                       sae_password_id="id1",
+                       key_mgmt="SAE", scan_freq="2412")
+    hapd.wait_sta()
+
+    hwsim_utils.test_connectivity_iface(dev[0], hapd, "brvlan1")
+
+    hapd.set("ext_eapol_frame_io", "1")
+    ev = hapd.wait_event(["EAPOL-TX"], timeout=15)
+    if ev is None:
+        raise Exception("Timeout on EAPOL-TX from hostapd")
+    time.sleep(0.1)
+
+    hwsim_utils.test_connectivity_iface(dev[0], hapd, "brvlan1")
+    hapd.set("ext_eapol_frame_io", "0")
+
+    ev = dev[0].wait_event(["RSN: Group rekeying completed"], timeout=11)
+    if ev is None:
+        raise Exception("GTK rekey timed out")
+    time.sleep(1)
+
+    hwsim_utils.test_connectivity_iface(dev[0], hapd, "brvlan1")

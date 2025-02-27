@@ -10,7 +10,7 @@ logger = logging.getLogger()
 import os
 
 import hostapd
-from utils import alloc_fail, fail_test
+from utils import alloc_fail, fail_test, wait_fail_trigger
 
 def test_bgscan_simple(dev, apdev):
     """bgscan_simple"""
@@ -99,9 +99,7 @@ def test_bgscan_simple_scan_failure(dev, apdev):
                    bgscan="simple:1:-20:2")
     with alloc_fail(dev[0], 1,
                     "wpa_supplicant_trigger_scan;bgscan_simple_timeout"):
-        ev = dev[0].wait_event(["CTRL-EVENT-SCAN-FAILED"], timeout=10)
-        if ev is None:
-            raise Exception("No scan failure reported")
+        wait_fail_trigger(dev[0], "GET_ALLOC_FAIL")
     ev = dev[0].wait_event(["CTRL-EVENT-SCAN-RESULTS"], 10)
     if ev is None:
         raise Exception("Scanning not continued after failure")
@@ -130,6 +128,37 @@ def test_bgscan_simple_same_scan_int(dev, apdev):
         ev = dev[0].wait_event(["CTRL-EVENT-SCAN-RESULTS"], 10)
         if ev is None:
             raise Exception("Scanning not continued")
+
+def test_bgscan_simple_btm_query(dev, apdev):
+    """bgscan_simple and BTM query"""
+    params = {"ssid": "bgscan",
+              "bss_transition": "1"}
+    hapd = hostapd.add_ap(apdev[0], params)
+
+    dev[0].connect("bgscan", key_mgmt="NONE", scan_freq="2412",
+                   bgscan="simple:1:-20:1:2")
+    ev = dev[0].wait_event(["WNM: BSS Transition Management Request"], 10)
+    if ev is None:
+        raise Exception("BSS TM not used")
+    for i in range(2):
+        ev = dev[0].wait_event(["CTRL-EVENT-SCAN-RESULTS"], 10)
+        if ev is None:
+            raise Exception("Scanning not continued")
+
+def test_bgscan_simple_btm_query_no_ap_support(dev, apdev):
+    """bgscan_simple and BTM query and no AP support"""
+    params = {"ssid": "bgscan",
+              "bss_transition": "0"}
+    hapd = hostapd.add_ap(apdev[0], params)
+
+    dev[0].connect("bgscan", key_mgmt="NONE", scan_freq="2412",
+                   bgscan="simple:1:-20:1:2")
+    ev = dev[0].wait_event(["WNM: BSS Transition Management Request",
+                            "CTRL-EVENT-SCAN-RESULTS"], 10)
+    if ev is None:
+        raise Exception("No background scan seen")
+    if "WNM: BSS" in ev:
+        raise Exception("Unexpected use of BSS TM")
 
 def test_bgscan_simple_oom(dev, apdev):
     """bgscan_simple OOM"""
@@ -274,9 +303,7 @@ def test_bgscan_learn_scan_failure(dev, apdev):
                    bgscan="learn:1:-20:2")
     with alloc_fail(dev[0], 1,
                     "wpa_supplicant_trigger_scan;bgscan_learn_timeout"):
-        ev = dev[0].wait_event(["CTRL-EVENT-SCAN-FAILED"], timeout=10)
-        if ev is None:
-            raise Exception("No scan failure reported")
+        wait_fail_trigger(dev[0], "GET_ALLOC_FAIL")
     ev = dev[0].wait_event(["CTRL-EVENT-SCAN-RESULTS"], 10)
     if ev is None:
         raise Exception("Scanning not continued after failure")
@@ -302,3 +329,14 @@ def test_bgscan_unknown_module(dev, apdev):
     hapd = hostapd.add_ap(apdev[0], {"ssid": "bgscan"})
     dev[0].connect("bgscan", key_mgmt="NONE", scan_freq="2412",
                    bgscan="unknown:-20:2")
+
+def test_bgscan_reconfig(dev, apdev):
+    """bgscan parameter update"""
+    hostapd.add_ap(apdev[0], {"ssid": "bgscan"})
+    hostapd.add_ap(apdev[1], {"ssid": "bgscan"})
+
+    id = dev[0].connect("bgscan", key_mgmt="NONE", scan_freq="2412",
+                        bgscan="simple:1:-20:2")
+    dev[0].set_network_quoted(id, "bgscan", "simple:1:-45:2")
+    dev[0].set_network_quoted(id, "bgscan", "learn:1:-20:2")
+    dev[0].set_network_quoted(id, "bgscan", "")

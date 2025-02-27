@@ -79,6 +79,10 @@ static void count_backlogged_sta(struct hostapd_data *hapd)
 	for (sta = hapd->sta_list; sta; sta = sta->next) {
 		if (hostapd_drv_read_sta_data(hapd, &data, sta->addr))
 			continue;
+#ifdef CONFIG_TESTING_OPTIONS
+		if (hapd->force_backlog_bytes)
+			data.backlog_bytes = 1;
+#endif /* CONFIG_TESTING_OPTIONS */
 
 		if (data.backlog_bytes > 0)
 			set_new_backlog_time(hapd, sta, &now);
@@ -228,7 +232,7 @@ static int get_weight_for_sta(struct hostapd_data *hapd, const u8 *sta)
 	struct airtime_sta_weight *wt;
 
 	wt = hapd->conf->airtime_weight_list;
-	while (wt && os_memcmp(wt->addr, sta, ETH_ALEN) != 0)
+	while (wt && !ether_addr_equal(wt->addr, sta))
 		wt = wt->next;
 
 	return wt ? wt->weight : hapd->conf->airtime_weight;

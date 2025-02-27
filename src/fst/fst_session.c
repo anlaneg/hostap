@@ -18,11 +18,6 @@
 #include "fst/fst_ctrl_defs.h"
 #endif /* CONFIG_FST_TEST */
 
-#define US_80211_TU 1024
-
-#define US_TO_TU(m) ((m) * / US_80211_TU)
-#define TU_TO_US(m) ((m) * US_80211_TU)
-
 #define FST_LLT_SWITCH_IMMEDIATELY 0
 
 #define fst_printf_session(s, level, format, ...) \
@@ -182,7 +177,8 @@ static void fst_session_timeout_handler(void *eloop_data, void *user_ctx)
 static void fst_session_stt_arm(struct fst_session *s)
 {
 	/* Action frames sometimes get delayed. Use relaxed timeout (2*) */
-	eloop_register_timeout(0, 2 * TU_TO_US(FST_DEFAULT_SESSION_TIMEOUT_TU),
+	eloop_register_timeout(0,
+			       2 * TU_TO_USEC(FST_DEFAULT_SESSION_TIMEOUT_TU),
 			       fst_session_timeout_handler, NULL, s);
 	s->stt_armed = true;
 }
@@ -238,10 +234,8 @@ fst_find_session_in_progress(const u8 *peer_addr, struct fst_group *g)
 
 	foreach_fst_session(s) {
 		if (s->group == g &&
-		    (os_memcmp(s->data.old_peer_addr, peer_addr,
-			       ETH_ALEN) == 0 ||
-		     os_memcmp(s->data.new_peer_addr, peer_addr,
-			       ETH_ALEN) == 0) &&
+		    (ether_addr_equal(s->data.old_peer_addr, peer_addr) ||
+		     ether_addr_equal(s->data.new_peer_addr, peer_addr)) &&
 		    fst_session_is_in_progress(s))
 			return s;
 	}

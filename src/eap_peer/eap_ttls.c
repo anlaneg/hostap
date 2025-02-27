@@ -65,7 +65,28 @@ struct eap_ttls_data {
 	int ready_for_tnc;
 	int tnc_started;
 #endif /* EAP_TNC */
+
+	enum { NO_AUTH, FOR_INITIAL, ALWAYS } phase2_auth;
 };
+
+
+static void eap_ttls_parse_phase1(struct eap_ttls_data *data,
+				  const char *phase1)
+{
+	if (os_strstr(phase1, "phase2_auth=0")) {
+		data->phase2_auth = NO_AUTH;
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TTLS: Do not require Phase 2 authentication");
+	} else if (os_strstr(phase1, "phase2_auth=1")) {
+		data->phase2_auth = FOR_INITIAL;
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TTLS: Require Phase 2 authentication for initial connection");
+	} else if (os_strstr(phase1, "phase2_auth=2")) {
+		data->phase2_auth = ALWAYS;
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TTLS: Require Phase 2 authentication for all cases");
+	}
+}
 
 
 static void * eap_ttls_init(struct eap_sm *sm)
@@ -82,6 +103,10 @@ static void * eap_ttls_init(struct eap_sm *sm)
 	selected = "EAP";
 	selected_non_eap = 0;
 	data->phase2_type = EAP_TTLS_PHASE2_EAP;
+	data->phase2_auth = FOR_INITIAL;
+
+	if (config && config->phase1)
+		eap_ttls_parse_phase1(data, config->phase1);
 
 	/*
 	 * Either one auth= type or one or more autheap= methods can be
@@ -268,10 +293,22 @@ static int eap_ttls_avp_encapsulate(struct wpabuf **resp, u32 avp_code,
 static int eap_ttls_v0_derive_key(struct eap_sm *sm,
 				  struct eap_ttls_data *data)
 {
+	const char *label;
+	const u8 eap_tls13_context[1] = { EAP_TYPE_TTLS };
+	const u8 *context = NULL;
+	size_t context_len = 0;
+
+	if (data->ssl.tls_v13) {
+		label = "EXPORTER_EAP_TLS_Key_Material";
+		context = eap_tls13_context;
+		context_len = sizeof(eap_tls13_context);
+	} else {
+		label = "ttls keying material";
+	}
+
 	eap_ttls_free_key(data);
-	data->key_data = eap_peer_tls_derive_key(sm, &data->ssl,
-						 "ttls keying material",
-						 NULL, 0,
+	data->key_data = eap_peer_tls_derive_key(sm, &data->ssl, label,
+						 context, context_len,
 						 EAP_TLS_KEY_LEN +
 						 EAP_EMSK_LEN);
 	if (!data->key_data) {
@@ -1441,6 +1478,7 @@ static int eap_ttls_decrypt(struct eap_sm *sm, struct eap_ttls_data *data,
 
 	if ((in_data == NULL || wpabuf_len(in_data) == 0) &&
 	    data->phase2_start) {
+start:
 		return eap_ttls_phase2_start(sm, data, ret, identifier,
 					     out_data);
 	}
@@ -1455,6 +1493,20 @@ static int eap_ttls_decrypt(struct eap_sm *sm, struct eap_ttls_data *data,
 	retval = eap_peer_tls_decrypt(sm, &data->ssl, in_data, &in_decrypted);
 	if (retval)
 		goto done;
+	if (wpabuf_len(in_decrypted) == 0) {
+		wpabuf_free(in_decrypted);
+		goto start;
+	}
+
+	/* RFC 9190 Section 2.5 */
+	if (data->ssl.tls_v13 && wpabuf_len(in_decrypted) == 1 &&
+	    *wpabuf_head_u8(in_decrypted) == 0) {
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TLS: ACKing protected success indication (appl data 0x00)");
+		eap_peer_tls_reset_output(&data->ssl);
+		wpabuf_free(in_decrypted);
+		return 1;
+	}
 
 continue_req:
 	data->phase2_start = 0;
@@ -1676,8 +1728,9 @@ static struct wpabuf * eap_ttls_process(struct eap_sm *sm, void *priv,
 static bool eap_ttls_has_reauth_data(struct eap_sm *sm, void *priv)
 {
 	struct eap_ttls_data *data = priv;
+
 	return tls_connection_established(sm->ssl_ctx, data->ssl.conn) &&
-		data->phase2_success;
+		data->phase2_success && data->phase2_auth != ALWAYS;
 }
 
 

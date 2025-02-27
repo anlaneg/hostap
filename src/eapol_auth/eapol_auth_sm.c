@@ -217,6 +217,9 @@ SM_STATE(AUTH_PAE, INITIALIZE)
 SM_STATE(AUTH_PAE, DISCONNECTED)
 {
 	int from_initialize = sm->auth_pae_state == AUTH_PAE_INITIALIZE;
+	bool pre_auth_logoff = sm->auth_pae_state == AUTH_PAE_ABORTING &&
+		sm->eapolLogoff && !sm->authenticated;
+	bool logoff = sm->eapolLogoff;
 
 	if (sm->eapolLogoff) {
 		if (sm->auth_pae_state == AUTH_PAE_CONNECTING)
@@ -231,10 +234,14 @@ SM_STATE(AUTH_PAE, DISCONNECTED)
 	setPortUnauthorized();
 	sm->reAuthCount = 0;
 	sm->eapolLogoff = false;
-	if (!from_initialize) {
-		sm->eapol->cb.finished(sm->eapol->conf.ctx, sm->sta, 0,
-				       sm->flags & EAPOL_SM_PREAUTH,
-				       sm->remediation);
+	if (!from_initialize && !pre_auth_logoff) {
+		if (sm->eapol->cb.finished(sm->eapol->conf.ctx, sm->sta, 0,
+					   sm->flags & EAPOL_SM_PREAUTH,
+					   logoff)) {
+			wpa_printf(MSG_DEBUG,
+				   "EAPOL: Do not restart since lower layers will disconnect the port after EAPOL-Logoff");
+			sm->stopped = true;
+		}
 	}
 }
 
@@ -291,7 +298,7 @@ SM_STATE(AUTH_PAE, HELD)
 				   eap_server_get_name(0, sm->eap_type_supp));
 	}
 	sm->eapol->cb.finished(sm->eapol->conf.ctx, sm->sta, 0,
-			       sm->flags & EAPOL_SM_PREAUTH, sm->remediation);
+			       sm->flags & EAPOL_SM_PREAUTH, false);
 }
 
 
@@ -316,8 +323,10 @@ SM_STATE(AUTH_PAE, AUTHENTICATED)
 			   sm->eap_type_authsrv,
 			   eap_server_get_name(0, sm->eap_type_authsrv),
 			   extra);
+	if (sm->authSuccess)
+		sm->authenticated++;
 	sm->eapol->cb.finished(sm->eapol->conf.ctx, sm->sta, 1,
-			       sm->flags & EAPOL_SM_PREAUTH, sm->remediation);
+			       sm->flags & EAPOL_SM_PREAUTH, false);
 }
 
 
@@ -397,7 +406,8 @@ SM_STEP(AUTH_PAE)
 			SM_ENTER(AUTH_PAE, DISCONNECTED);
 			break;
 		case AUTH_PAE_DISCONNECTED:
-			SM_ENTER(AUTH_PAE, RESTART);
+			if (!sm->stopped)
+				SM_ENTER(AUTH_PAE, RESTART);
 			break;
 		case AUTH_PAE_RESTART:
 			if (!sm->eap_if->eapRestart)
@@ -1017,13 +1027,9 @@ static int eapol_sm_get_eap_user(void *ctx, const u8 *identity,
 				 struct eap_user *user)
 {
 	struct eapol_state_machine *sm = ctx;
-	int ret;
 
-	ret = sm->eapol->cb.get_eap_user(sm->eapol->conf.ctx, identity,
-					 identity_len, phase2, user);
-	if (user->remediation)
-		sm->remediation = 1;
-	return ret;
+	return sm->eapol->cb.get_eap_user(sm->eapol->conf.ctx, identity,
+					  identity_len, phase2, user);
 }
 
 

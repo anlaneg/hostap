@@ -67,6 +67,7 @@ struct eap_peap_data {
 	u8 cmk[20];
 	int soh; /* Whether IF-TNCCS-SOH (Statement of Health; Microsoft NAP)
 		  * is enabled. */
+	enum { NO_AUTH, FOR_INITIAL, ALWAYS } phase2_auth;
 };
 
 
@@ -114,6 +115,19 @@ static void eap_peap_parse_phase1(struct eap_peap_data *data,
 		wpa_printf(MSG_DEBUG, "EAP-PEAP: Require cryptobinding");
 	}
 
+	if (os_strstr(phase1, "phase2_auth=0")) {
+		data->phase2_auth = NO_AUTH;
+		wpa_printf(MSG_DEBUG,
+			   "EAP-PEAP: Do not require Phase 2 authentication");
+	} else if (os_strstr(phase1, "phase2_auth=1")) {
+		data->phase2_auth = FOR_INITIAL;
+		wpa_printf(MSG_DEBUG,
+			   "EAP-PEAP: Require Phase 2 authentication for initial connection");
+	} else if (os_strstr(phase1, "phase2_auth=2")) {
+		data->phase2_auth = ALWAYS;
+		wpa_printf(MSG_DEBUG,
+			   "EAP-PEAP: Require Phase 2 authentication for all cases");
+	}
 #ifdef EAP_TNC
 	if (os_strstr(phase1, "tnc=soh2")) {
 		data->soh = 2;
@@ -142,6 +156,7 @@ static void * eap_peap_init(struct eap_sm *sm)
 	data->force_peap_version = -1;
 	data->peap_outer_success = 2;
 	data->crypto_binding = OPTIONAL_BINDING;
+	data->phase2_auth = FOR_INITIAL;
 
 	if (config && config->phase1)
 		eap_peap_parse_phase1(data, config->phase1);
@@ -454,6 +469,20 @@ static int eap_tlv_validate_cryptobinding(struct eap_sm *sm,
 }
 
 
+static bool peap_phase2_sufficient(struct eap_sm *sm,
+				   struct eap_peap_data *data)
+{
+	if ((data->phase2_auth == ALWAYS ||
+	     (data->phase2_auth == FOR_INITIAL &&
+	      !tls_connection_resumed(sm->ssl_ctx, data->ssl.conn) &&
+	      !data->ssl.client_cert_conf) ||
+	     data->phase2_eap_started) &&
+	    !data->phase2_eap_success)
+		return false;
+	return true;
+}
+
+
 /**
  * eap_tlv_process - Process a received EAP-TLV message and generate a response
  * @sm: Pointer to EAP state machine allocated with eap_peer_sm_init()
@@ -566,6 +595,11 @@ static int eap_tlv_process(struct eap_sm *sm, struct eap_peap_data *data,
 			if (force_failure) {
 				wpa_printf(MSG_INFO, "EAP-TLV: Earlier failure"
 					   " - force failed Phase 2");
+				resp_status = EAP_TLV_RESULT_FAILURE;
+				ret->decision = DECISION_FAIL;
+			} else if (!peap_phase2_sufficient(sm, data)) {
+				wpa_printf(MSG_INFO,
+					   "EAP-PEAP: Server indicated Phase 2 success, but sufficient Phase 2 authentication has not been completed");
 				resp_status = EAP_TLV_RESULT_FAILURE;
 				ret->decision = DECISION_FAIL;
 			} else {
@@ -803,6 +837,10 @@ static int eap_peap_decrypt(struct eap_sm *sm, struct eap_peap_data *data,
 	res = eap_peer_tls_decrypt(sm, &data->ssl, in_data, &in_decrypted);
 	if (res)
 		return res;
+	if (wpabuf_len(in_decrypted) == 0) {
+		wpabuf_free(in_decrypted);
+		return 1;
+	}
 
 continue_req:
 	wpa_hexdump_buf(MSG_DEBUG, "EAP-PEAP: Decrypted Phase 2 EAP",
@@ -883,8 +921,7 @@ continue_req:
 			/* EAP-Success within TLS tunnel is used to indicate
 			 * shutdown of the TLS channel. The authentication has
 			 * been completed. */
-			if (data->phase2_eap_started &&
-			    !data->phase2_eap_success) {
+			if (!peap_phase2_sufficient(sm, data)) {
 				wpa_printf(MSG_DEBUG, "EAP-PEAP: Phase 2 "
 					   "Success used to indicate success, "
 					   "but Phase 2 EAP was not yet "
@@ -1081,7 +1118,11 @@ static struct wpabuf * eap_peap_process(struct eap_sm *sm, void *priv,
 		}
 
 		if (tls_connection_established(sm->ssl_ctx, data->ssl.conn)) {
-			char *label;
+			const char *label;
+			const u8 eap_tls13_context[1] = { EAP_TYPE_PEAP };
+			const u8 *context = NULL;
+			size_t context_len = 0;
+
 			wpa_printf(MSG_DEBUG,
 				   "EAP-PEAP: TLS done, proceed to Phase 2");
 			eap_peap_free_key(data);
@@ -1091,16 +1132,25 @@ static struct wpabuf * eap_peap_process(struct eap_sm *sm, void *priv,
 			 * PEAPv1 implementations seem to be using the old
 			 * label, "client EAP encryption", instead. Use the old
 			 * label by default, but allow it to be configured with
-			 * phase1 parameter peaplabel=1. */
-			if (data->force_new_label)
+			 * phase1 parameter peaplabel=1.
+			 *
+			 * When using TLS 1.3, draft-ietf-emu-tls-eap-types
+			 * defines a new set of label and context parameters.
+			 */
+			if (data->ssl.tls_v13) {
+				label = "EXPORTER_EAP_TLS_Key_Material";
+				context = eap_tls13_context;
+				context_len = sizeof(eap_tls13_context);
+			} else if (data->force_new_label) {
 				label = "client PEAP encryption";
-			else
+			} else {
 				label = "client EAP encryption";
+			}
 			wpa_printf(MSG_DEBUG, "EAP-PEAP: using label '%s' in "
 				   "key derivation", label);
 			data->key_data =
 				eap_peer_tls_derive_key(sm, &data->ssl, label,
-							NULL, 0,
+							context, context_len,
 							EAP_TLS_KEY_LEN +
 							EAP_EMSK_LEN);
 			if (data->key_data) {
@@ -1182,8 +1232,9 @@ static struct wpabuf * eap_peap_process(struct eap_sm *sm, void *priv,
 static bool eap_peap_has_reauth_data(struct eap_sm *sm, void *priv)
 {
 	struct eap_peap_data *data = priv;
+
 	return tls_connection_established(sm->ssl_ctx, data->ssl.conn) &&
-		data->phase2_success;
+		data->phase2_success && data->phase2_auth != ALWAYS;
 }
 
 

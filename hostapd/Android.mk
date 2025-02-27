@@ -34,6 +34,10 @@ ifeq ($(BOARD_HOSTAPD_PRIVATE_LIB),)
 L_CFLAGS += -DANDROID_LIB_STUB
 endif
 
+ifneq ($(BOARD_HOSTAPD_PRIVATE_LIB_EVENT),)
+L_CFLAGS += -DANDROID_LIB_EVENT
+endif
+
 # Use Android specific directory for control interface sockets
 L_CFLAGS += -DCONFIG_CTRL_IFACE_CLIENT_DIR=\"/data/misc/wifi/sockets\"
 L_CFLAGS += -DCONFIG_CTRL_IFACE_DIR=\"/data/system/hostapd\"
@@ -123,7 +127,7 @@ HOBJS += src/utils/trace.c
 LDFLAGS += -rdynamic
 L_CFLAGS += -funwind-tables
 ifdef CONFIG_WPA_TRACE_BFD
-L_CFLAGS += -DWPA_TRACE_BFD
+L_CFLAGS += -DWPA_TRACE_BFD -fno-inline -fno-optimize-sibling-calls
 LIBS += -lbfd
 LIBS_c += -lbfd
 LIBS_h += -lbfd
@@ -150,6 +154,7 @@ OBJS += src/utils/crc32.c
 OBJS += src/common/ieee802_11_common.c
 OBJS += src/common/wpa_common.c
 OBJS += src/common/hw_features_common.c
+OBJS += src/common/ptksa_cache.c
 
 OBJS += src/eapol_auth/eapol_auth_sm.c
 
@@ -233,6 +238,8 @@ L_CFLAGS += -DCONFIG_OCV
 OBJS += src/common/ocv.c
 endif
 
+NEED_AES_UNWRAP=y
+
 ifdef CONFIG_IEEE80211R
 L_CFLAGS += -DCONFIG_IEEE80211R -DCONFIG_IEEE80211R_AP
 OBJS += src/ap/wpa_auth_ft.c
@@ -252,6 +259,8 @@ L_CFLAGS += -DCONFIG_SAE
 OBJS += src/common/sae.c
 ifdef CONFIG_SAE_PK
 L_CFLAGS += -DCONFIG_SAE_PK
+NEED_AES_SIV=y
+NEED_BASE64=y
 OBJS += src/common/sae_pk.c
 endif
 NEED_ECC=y
@@ -288,6 +297,12 @@ endif
 
 ifdef CONFIG_IEEE80211AC
 L_CFLAGS += -DCONFIG_IEEE80211AC
+endif
+
+ifdef CONFIG_IEEE80211BE
+CONFIG_IEEE80211AX=y
+L_CFLAGS += -DCONFIG_IEEE80211BE
+OBJS += src/ap/ieee802_11_eht.c
 endif
 
 ifdef CONFIG_IEEE80211AX
@@ -414,7 +429,7 @@ endif
 ifdef CONFIG_EAP_SIM_COMMON
 OBJS += src/eap_common/eap_sim_common.c
 # Example EAP-SIM/AKA interface for GSM/UMTS authentication. This can be
-# replaced with another file implementating the interface specified in
+# replaced with another file implementing the interface specified in
 # eap_sim_db.h.
 OBJS += src/eap_server/eap_sim_db.c
 NEED_FIPS186_2_PRF=y
@@ -563,6 +578,24 @@ NEED_ASN1=y
 ifdef CONFIG_DPP2
 L_CFLAGS += -DCONFIG_DPP2
 endif
+ifdef CONFIG_DPP3
+L_CFLAGS += -DCONFIG_DPP3
+endif
+endif
+
+ifdef CONFIG_NAN_USD
+OBJS += src/common/nan_de.c
+OBJS += src/ap/nan_usd_ap.c
+L_CFLAGS += -DCONFIG_NAN_USD
+endif
+
+ifdef CONFIG_PASN
+L_CFLAGS += -DCONFIG_PASN
+L_CFLAGS += -DCONFIG_PTKSA_CACHE
+NEED_HMAC_SHA256_KDF=y
+NEED_HMAC_SHA384_KDF=y
+NEED_SHA256=y
+NEED_SHA384=y
 endif
 
 ifdef CONFIG_EAP_IKEV2
@@ -615,6 +648,11 @@ ifdef CHAP
 OBJS += src/eap_common/chap.c
 endif
 
+ifdef CONFIG_RADIUS_TLS
+TLS_FUNCS=y
+L_CFLAGS += -DCONFIG_RADIUS_TLS
+endif
+
 ifdef TLS_FUNCS
 NEED_DES=y
 # Shared TLS functions (needed for EAP_TLS, EAP_PEAP, and EAP_TTLS)
@@ -636,6 +674,7 @@ L_CFLAGS += -DCONFIG_TLSV12
 endif
 
 ifeq ($(CONFIG_TLS), openssl)
+L_CFLAGS += -DCRYPTO_RSA_OAEP_SHA256
 ifdef TLS_FUNCS
 OBJS += src/crypto/tls_openssl.c
 OBJS += src/crypto/tls_openssl_ocsp.c
@@ -808,7 +847,9 @@ endif
 ifdef NEED_AES_ENCBLOCK
 AESOBJS += src/crypto/aes-encblock.c
 endif
+ifneq ($(CONFIG_TLS), openssl)
 AESOBJS += src/crypto/aes-omac1.c
+endif
 ifdef NEED_AES_UNWRAP
 ifneq ($(CONFIG_TLS), openssl)
 NEED_AES_DEC=y
@@ -893,6 +934,17 @@ ifdef CONFIG_INTERNAL_RC4
 ifndef CONFIG_NO_RC4
 OBJS += src/crypto/rc4.c
 endif
+endif
+endif
+
+ifdef CONFIG_SAE
+ifdef NEED_SHA384
+# Need to add HMAC-SHA384 KDF as well, if SHA384 was enabled.
+NEED_HMAC_SHA384_KDF=y
+endif
+ifdef NEED_SHA512
+# Need to add HMAC-SHA512 KDF as well, if SHA512 was enabled.
+NEED_HMAC_SHA512_KDF=y
 endif
 endif
 
@@ -1009,6 +1061,9 @@ endif
 ifdef NEED_AP_MLME
 OBJS += src/ap/wmm.c
 OBJS += src/ap/ap_list.c
+OBJS += src/ap/comeback_token.c
+OBJS += src/pasn/pasn_responder.c
+OBJS += src/pasn/pasn_common.c
 OBJS += src/ap/ieee802_11.c
 OBJS += src/ap/hw_features.c
 OBJS += src/ap/dfs.c

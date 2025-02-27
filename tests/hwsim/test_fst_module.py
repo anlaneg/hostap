@@ -2211,6 +2211,9 @@ def test_fst_session_oom(dev, apdev, test_params):
             res = initiator.grequest("FST-MANAGER SESSION_INITIATE " + sid)
             if not res.startswith("OK"):
                 raise Exception("Unexpected SESSION_INITIATE result")
+            # Leave some time for the frame to be transmitted, received,
+            # and processed.
+            time.sleep(0.1)
     finally:
         fst_module_aux.disconnect_two_ap_sta_pairs(ap1, ap2, sta1, sta2)
         fst_module_aux.stop_two_ap_sta_pairs(ap1, ap2, sta1, sta2)
@@ -2239,6 +2242,7 @@ def test_fst_session_respond_fail(dev, apdev, test_params):
         sta = sta1.get_instance()
         sta.request("DISCONNECT")
         sta.wait_disconnected()
+        ap1.hapd.wait_sta_disconnect()
         req = "FST-MANAGER SESSION_RESPOND %s reject" % ev['id']
         s = ap1.grequest(req)
         if not s.startswith("FAIL"):
@@ -2362,6 +2366,7 @@ def fst_start_and_connect(apdev, group, sgroup):
     wpas.connect("fst_11a", key_mgmt="NONE", scan_freq="5180",
                  wait_connect=False)
     wpas.wait_connected()
+    hapd.wait_sta()
 
     fst_wait_event_peer_sta(wpas, "connected", wpas.ifname, apdev[0]['bssid'])
     fst_wait_event_peer_ap(hglobal, "connected", apdev[0]['ifname'],
@@ -2370,10 +2375,12 @@ def fst_start_and_connect(apdev, group, sgroup):
     wpas2.connect("fst_11g", key_mgmt="NONE", scan_freq="2412",
                   wait_connect=False)
     wpas2.wait_connected()
+    hapd2.wait_sta()
 
     fst_wait_event_peer_sta(wpas, "connected", wpas2.ifname, apdev[1]['bssid'])
     fst_wait_event_peer_ap(hglobal, "connected", apdev[1]['ifname'],
                            wpas2.own_addr())
+    time.sleep(0.1)
     return hglobal, wpas, wpas2, hapd, hapd2
 
 def test_fst_test_setup(dev, apdev, test_params):
@@ -2407,7 +2414,7 @@ def _test_fst_test_setup(dev, apdev, test_params):
         if ev is None:
             raise Exception("No FST-EVENT-SESSION (AP)")
         if "new_state=SETUP_COMPLETION" in ev:
-            f = re.search("session_id=(\d+)", ev)
+            f = re.search(r"session_id=(\d+)", ev)
             if f is None:
                 raise Exception("No session_id in FST-EVENT-SESSION")
             sid_ap = f.group(1)
@@ -2535,8 +2542,11 @@ def _test_fst_setup_mbie_diff(dev, apdev, test_params):
     mbie = "9e16040200010200000004000000000000000000000000ff"
     try:
         with alloc_fail(hapd, 1, "mb_ies_by_info"):
+            # If no_wait is set to True an explicit wait would need to be
+            # inserted to ensure the failure was triggered. However, as the
+            # setup succeeds (currently), we can simply do the wait here.
             fst_setup_req(wpas, hglobal, 5180, apdev[0]['bssid'], req, stie,
-                          mbie, no_wait=True)
+                          mbie, no_wait=False)
     except HwsimSkip as e:
         # Skip exception to allow proper cleanup
         pass
@@ -2580,7 +2590,7 @@ def _test_fst_many_setup(dev, apdev, test_params):
             if ev is None:
                 raise Exception("No FST-EVENT-SESSION (AP)")
             if "new_state=SETUP_COMPLETION" in ev:
-                f = re.search("session_id=(\d+)", ev)
+                f = re.search(r"session_id=(\d+)", ev)
                 if f is None:
                     raise Exception("No session_id in FST-EVENT-SESSION")
                 sid_ap = f.group(1)
@@ -2744,7 +2754,7 @@ def _test_fst_session_initiate_errors(dev, apdev, test_params):
         if ev is None:
             raise Exception("No FST-EVENT-SESSION (AP)")
         if "new_state=SETUP_COMPLETION" in ev:
-            f = re.search("session_id=(\d+)", ev)
+            f = re.search(r"session_id=(\d+)", ev)
             if f is None:
                 raise Exception("No session_id in FST-EVENT-SESSION")
             sid_ap = f.group(1)
@@ -2786,7 +2796,7 @@ def _test_fst_session_respond_errors(dev, apdev, test_params):
         if ev is None:
             raise Exception("No FST-EVENT-SESSION (AP)")
         if "new_state=SETUP_COMPLETION" in ev:
-            f = re.search("session_id=(\d+)", ev)
+            f = re.search(r"session_id=(\d+)", ev)
             if f is None:
                 raise Exception("No session_id in FST-EVENT-SESSION")
             sid_ap = f.group(1)

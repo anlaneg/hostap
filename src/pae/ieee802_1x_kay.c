@@ -221,8 +221,16 @@ ieee802_1x_mka_dump_dist_sak_body(struct ieee802_1x_mka_dist_sak_body *body)
 
 	wpa_printf(MSG_DEBUG, "\tKey Number............: %d",
 		   be_to_host32(body->kn));
-	/* TODO: Other than GCM-AES-128 case: MACsec Cipher Suite */
-	wpa_hexdump(MSG_DEBUG, "\tAES Key Wrap of SAK...:", body->sak, 24);
+	if (body_len == 28) {
+		wpa_hexdump(MSG_DEBUG, "\tAES Key Wrap of SAK...:",
+			    body->sak, 24);
+	} else if (body_len > CS_ID_LEN - sizeof(body->kn)) {
+		wpa_hexdump(MSG_DEBUG, "\tMACsec Cipher Suite...:",
+			    body->sak, CS_ID_LEN);
+		wpa_hexdump(MSG_DEBUG, "\tAES Key Wrap of SAK...:",
+			    body->sak + CS_ID_LEN,
+			    body_len - CS_ID_LEN - sizeof(body->kn));
+	}
 }
 
 
@@ -1197,7 +1205,7 @@ ieee802_1x_mka_decode_potential_peer_body(
 			/* My message id is used by other participant */
 			if (peer_mn > participant->mn &&
 			    !reset_participant_mi(participant))
-				wpa_printf(MSG_DEBUG, "KaY: Could not update mi");
+				wpa_printf(MSG_DEBUG, "KaY: Could not update MI");
 			continue;
 		}
 	}
@@ -1826,6 +1834,18 @@ ieee802_1x_mka_decode_dist_sak_body(
 
 	kay->rcvd_keys++;
 	participant->to_use_sak = true;
+
+	/*
+	 * The key server may not include dist sak and use sak in one packet.
+	 * Meanwhile, after dist sak, the current participant (non-key server)
+	 * will install SC or SA(s) after decoding the dist sak which may take
+	 * few seconds in real physical platforms. Meanwhile, the peer expire
+	 * time is always initialized at adding the key server to peer list.
+	 * The gap between adding the key server to peer list and processing
+	 * next use sak packet may exceed the threshold of MKA_LIFE_TIME (6 s).
+	 * It will cause an unexpected cleanup (delete SC and SA(s)), so,
+	 * update the expire timeout at dist sak also. */
+	peer->expire = time(NULL) + MKA_LIFE_TIME / 1000;
 
 	return 0;
 }
@@ -2506,7 +2526,7 @@ ieee802_1x_participant_send_mkpdu(
 	}
 
 	if (ieee802_1x_kay_encode_mkpdu(participant, buf)) {
-		wpa_printf(MSG_ERROR, "KaY: encode mkpdu fail");
+		wpa_printf(MSG_ERROR, "KaY: encode MKPDU fail");
 		return -1;
 	}
 
@@ -2542,6 +2562,7 @@ static void ieee802_1x_participant_timer(void *eloop_ctx, void *timeout_ctx)
 	struct ieee802_1x_kay_peer *peer, *pre_peer;
 	time_t now = time(NULL);
 	bool lp_changed;
+	bool key_server_removed;
 	struct receive_sc *rxsc, *pre_rxsc;
 	struct transmit_sa *txsa, *pre_txsa;
 
@@ -2566,13 +2587,12 @@ static void ieee802_1x_participant_timer(void *eloop_ctx, void *timeout_ctx)
 	}
 
 	lp_changed = false;
+	key_server_removed = false;
 	dl_list_for_each_safe(peer, pre_peer, &participant->live_peers,
 			      struct ieee802_1x_kay_peer, list) {
 		if (now > peer->expire) {
 			wpa_printf(MSG_DEBUG, "KaY: Live peer removed");
-			wpa_hexdump(MSG_DEBUG, "\tMI: ", peer->mi,
-				    sizeof(peer->mi));
-			wpa_printf(MSG_DEBUG, "\tMN: %d", peer->mn);
+			ieee802_1x_kay_dump_peer(peer);
 			dl_list_for_each_safe(rxsc, pre_rxsc,
 					      &participant->rxsc_list,
 					      struct receive_sc, list) {
@@ -2581,10 +2601,30 @@ static void ieee802_1x_participant_timer(void *eloop_ctx, void *timeout_ctx)
 						participant, rxsc);
 				}
 			}
+			key_server_removed |= peer->is_key_server;
 			dl_list_del(&peer->list);
 			os_free(peer);
 			lp_changed = true;
 		}
+	}
+
+	/* The key server may be removed due to the ingress packets delay.
+	 * In this situation, the endpoint of the key server may not be aware
+	 * of this participant who has removed the key server from the peer
+	 * list. Because the egress traffic is normal, the key server will not
+	 * remove this participant from the peer list of the key server. So in
+	 * the next MKA message, the key server will not dispatch a new SAK to
+	 * this participant. And this participant cannot be aware that that is
+	 * a new round of communication so it will not update its MI at
+	 * re-adding the key server to its peer list. So we need to update MI
+	 * to avoid the failure of the re-establishment MKA session. */
+	if (key_server_removed) {
+		if (!reset_participant_mi(participant))
+			wpa_printf(MSG_WARNING,
+				   "KaY: Could not update MI on key server removal");
+		else
+			wpa_printf(MSG_DEBUG,
+				   "KaY: Update MI on key server removal");
 	}
 
 	if (lp_changed) {
@@ -2628,9 +2668,7 @@ static void ieee802_1x_participant_timer(void *eloop_ctx, void *timeout_ctx)
 			      struct ieee802_1x_kay_peer, list) {
 		if (now > peer->expire) {
 			wpa_printf(MSG_DEBUG, "KaY: Potential peer removed");
-			wpa_hexdump(MSG_DEBUG, "\tMI: ", peer->mi,
-				    sizeof(peer->mi));
-			wpa_printf(MSG_DEBUG, "\tMN: %d", peer->mn);
+			ieee802_1x_kay_dump_peer(peer);
 			dl_list_del(&peer->list);
 			os_free(peer);
 		}
@@ -3057,12 +3095,12 @@ int ieee802_1x_kay_enable_new_info(struct ieee802_1x_kay *kay)
 
 
 /**
- * ieee802_1x_kay_mkpdu_sanity_check -
- * Sanity checks specified in IEEE Std 802.1X-2010, 11.11.2 (Validation of
+ * ieee802_1x_kay_mkpdu_validity_check -
+ * Validity checks specified in IEEE Std 802.1X-2010, 11.11.2 (Validation of
  * MKPDUs)
  */
-static int ieee802_1x_kay_mkpdu_sanity_check(struct ieee802_1x_kay *kay,
-					     const u8 *buf, size_t len)
+static int ieee802_1x_kay_mkpdu_validity_check(struct ieee802_1x_kay *kay,
+					       const u8 *buf, size_t len)
 {
 	struct ieee8023_hdr *eth_hdr;
 	struct ieee802_1x_hdr *eapol_hdr;
@@ -3087,9 +3125,9 @@ static int ieee802_1x_kay_mkpdu_sanity_check(struct ieee802_1x_kay *kay,
 		   be_to_host16(eth_hdr->ethertype));
 
 	/* the destination address shall not be an individual address */
-	if (os_memcmp(eth_hdr->dest, pae_group_addr, ETH_ALEN) != 0) {
+	if (!is_multicast_ether_addr(eth_hdr->dest)) {
 		wpa_printf(MSG_DEBUG,
-			   "KaY: ethernet destination address is not PAE group address");
+			   "KaY: ethernet destination address is not a multicast adddress");
 		return -1;
 	}
 
@@ -3215,7 +3253,7 @@ static int ieee802_1x_kay_decode_mkpdu(struct ieee802_1x_kay *kay,
 
 	wpa_printf(MSG_DEBUG, "KaY: Decode received MKPDU (ifname=%s)",
 		   kay->if_name);
-	if (ieee802_1x_kay_mkpdu_sanity_check(kay, buf, len))
+	if (ieee802_1x_kay_mkpdu_validity_check(kay, buf, len))
 		return -1;
 
 	/* handle basic parameter set */
@@ -3331,7 +3369,7 @@ static int ieee802_1x_kay_decode_mkpdu(struct ieee802_1x_kay *kay,
 			   "KaY: Discarding Rx MKPDU: decode of parameter set type (%d) failed",
 			   MKA_SAK_USE);
 		if (!reset_participant_mi(participant))
-			wpa_printf(MSG_DEBUG, "KaY: Could not update mi");
+			wpa_printf(MSG_DEBUG, "KaY: Could not update MI");
 		else
 			wpa_printf(MSG_DEBUG,
 				   "KaY: Selected a new random MI: %s",
@@ -3456,7 +3494,8 @@ static void kay_l2_receive(void *ctx, const u8 *src_addr, const u8 *buf,
 struct ieee802_1x_kay *
 ieee802_1x_kay_init(struct ieee802_1x_kay_ctx *ctx, enum macsec_policy policy,
 		    bool macsec_replay_protect, u32 macsec_replay_window,
-		    u16 port, u8 priority, const char *ifname, const u8 *addr)
+		    u8 macsec_offload, u16 port, u8 priority,
+		    u32 macsec_csindex, const char *ifname, const u8 *addr)
 {
 	struct ieee802_1x_kay *kay;
 
@@ -3493,7 +3532,7 @@ ieee802_1x_kay_init(struct ieee802_1x_kay_ctx *ctx, enum macsec_policy policy,
 	kay->dist_time = 0;
 
 	kay->pn_exhaustion = PENDING_PN_EXHAUSTION;
-	kay->macsec_csindex = DEFAULT_CS_INDEX;
+	kay->macsec_csindex = macsec_csindex;
 	kay->mka_algindex = DEFAULT_MKA_ALG_INDEX;
 	kay->mka_version = MKA_VERSION_ID;
 
@@ -3515,6 +3554,7 @@ ieee802_1x_kay_init(struct ieee802_1x_kay_ctx *ctx, enum macsec_policy policy,
 		kay->macsec_validate = Disabled;
 		kay->macsec_replay_protect = false;
 		kay->macsec_replay_window = 0;
+		kay->macsec_offload = 0;
 		kay->macsec_confidentiality = CONFIDENTIALITY_NONE;
 		kay->mka_hello_time = MKA_HELLO_TIME;
 	} else {
@@ -3531,6 +3571,7 @@ ieee802_1x_kay_init(struct ieee802_1x_kay_ctx *ctx, enum macsec_policy policy,
 		kay->macsec_validate = Strict;
 		kay->macsec_replay_protect = macsec_replay_protect;
 		kay->macsec_replay_window = macsec_replay_window;
+		kay->macsec_offload = macsec_offload;
 		kay->mka_hello_time = MKA_HELLO_TIME;
 	}
 
@@ -3542,7 +3583,7 @@ ieee802_1x_kay_init(struct ieee802_1x_kay_ctx *ctx, enum macsec_policy policy,
 		goto error;
 	}
 
-	wpa_printf(MSG_DEBUG, "KaY: secy init macsec done");
+	wpa_printf(MSG_DEBUG, "KaY: SecY init MACsec done");
 
 	/* init CP */
 	kay->cp = ieee802_1x_cp_sm_init(kay);
@@ -3633,7 +3674,7 @@ ieee802_1x_kay_create_mka(struct ieee802_1x_kay *kay,
 		   kay->if_name, mode_txt(mode), yes_no(is_authenticator));
 
 	if (!kay || !ckn || !cak) {
-		wpa_printf(MSG_ERROR, "KaY: ckn or cak is null");
+		wpa_printf(MSG_ERROR, "KaY: CKN or CAK is null");
 		return NULL;
 	}
 
@@ -3731,6 +3772,7 @@ ieee802_1x_kay_create_mka(struct ieee802_1x_kay *kay,
 	secy_cp_control_protect_frames(kay, kay->macsec_protect);
 	secy_cp_control_replay(kay, kay->macsec_replay_protect,
 			       kay->macsec_replay_window);
+	secy_cp_control_offload(kay, kay->macsec_offload);
 	if (secy_create_transmit_sc(kay, participant->txsc))
 		goto fail;
 
@@ -3816,33 +3858,28 @@ ieee802_1x_kay_delete_mka(struct ieee802_1x_kay *kay, struct mka_key_name *ckn)
 	dl_list_del(&participant->list);
 
 	/* remove live peer */
-	while (!dl_list_empty(&participant->live_peers)) {
-		peer = dl_list_entry(participant->live_peers.next,
-				     struct ieee802_1x_kay_peer, list);
+	while ((peer = dl_list_first(&participant->live_peers,
+				     struct ieee802_1x_kay_peer, list))) {
 		dl_list_del(&peer->list);
 		os_free(peer);
 	}
 
 	/* remove potential peer */
-	while (!dl_list_empty(&participant->potential_peers)) {
-		peer = dl_list_entry(participant->potential_peers.next,
-				     struct ieee802_1x_kay_peer, list);
+	while ((peer = dl_list_first(&participant->potential_peers,
+				     struct ieee802_1x_kay_peer, list))) {
 		dl_list_del(&peer->list);
 		os_free(peer);
 	}
 
 	/* remove sak */
-	while (!dl_list_empty(&participant->sak_list)) {
-		sak = dl_list_entry(participant->sak_list.next,
-				    struct data_key, list);
+	while ((sak = dl_list_first(&participant->sak_list,
+				    struct data_key, list))) {
 		dl_list_del(&sak->list);
 		ieee802_1x_kay_deinit_data_key(sak);
 	}
-	while (!dl_list_empty(&participant->rxsc_list)) {
-		rxsc = dl_list_entry(participant->rxsc_list.next,
-				     struct receive_sc, list);
+	while ((rxsc = dl_list_first(&participant->rxsc_list,
+				     struct receive_sc, list)))
 		ieee802_1x_kay_deinit_receive_sc(participant, rxsc);
-	}
 	ieee802_1x_kay_deinit_transmit_sc(participant, participant->txsc);
 
 	os_memset(&participant->cak, 0, sizeof(participant->cak));

@@ -36,6 +36,7 @@ enum {
 #define wpa_debug_open_file(p) do { } while (0)
 #define wpa_debug_close_file() do { } while (0)
 #define wpa_debug_setup_stdout() do { } while (0)
+#define wpa_debug_stop_log() do { } while (0)
 #define wpa_dbg(args...) do { } while (0)
 
 static inline int wpa_debug_reopen_file(void)
@@ -49,6 +50,7 @@ int wpa_debug_open_file(const char *path);
 int wpa_debug_reopen_file(void);
 void wpa_debug_close_file(void);
 void wpa_debug_setup_stdout(void);
+void wpa_debug_stop_log(void);
 
 /**
  * wpa_debug_printf_timestamp - Print timestamp for debug output

@@ -16,7 +16,7 @@
 #include "wpa_supplicant_i.h"
 #include "bss.h"
 #include "wnm_sta.h"
-#include "config.h"
+#include "../../../wpa_supplicant/config.h"
 #include "../fuzzer-common.h"
 
 
@@ -28,6 +28,7 @@ struct arg_ctx {
 	struct wpa_driver_ops driver;
 	struct wpa_sm wpa;
 	struct wpa_config conf;
+	struct wpa_ssid ssid;
 };
 
 
@@ -50,9 +51,12 @@ static int init_wpa(struct arg_ctx *ctx)
 	ctx->wpa_s.wpa_state = WPA_COMPLETED;
 	os_memcpy(ctx->wpa_s.bssid, "\x02\x00\x00\x00\x03\x00", ETH_ALEN);
 	ctx->wpa_s.current_bss = &ctx->bss;
+	ctx->wpa_s.current_ssid = &ctx->ssid;
 	ctx->wpa_s.driver = &ctx->driver;
 	ctx->wpa_s.wpa = &ctx->wpa;
 	ctx->wpa_s.conf = &ctx->conf;
+	if (wpa_bss_init(&ctx->wpa_s) < 0)
+		return -1;
 
 	return 0;
 }
@@ -60,7 +64,8 @@ static int init_wpa(struct arg_ctx *ctx)
 
 static void deinit_wpa(struct arg_ctx *ctx)
 {
-	wnm_deallocate_memory(&ctx->wpa_s);
+	wnm_btm_reset(&ctx->wpa_s);
+	wpa_bss_flush(&ctx->wpa_s);
 }
 
 

@@ -24,6 +24,7 @@ setup_params = {"setup_hw" : "./tests/setup_hw.sh",
                 "wlantest_cli" : "./tests/wlantest_cli",
                 "country" : "US",
                 "log_dir" : "/tmp/",
+                "remote_cli" : True,
                 "ipv4_test_net" : "192.168.12.0",
                 "trace_start" : "./tests/trace_start.sh",
                 "trace_stop" : "./tests/trace_stop.sh",
@@ -69,6 +70,8 @@ def get_devices(filename="cfg.py"):
 def get_device(devices, name=None, flags=None, lock=False):
     if name is None and flags is None:
         raise Exception("Failed to get device")
+    word = name.split(":")
+    name = word[0]
     for device in devices:
         if device['name'] == name:
             return device

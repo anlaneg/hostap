@@ -1,9 +1,11 @@
-TESTS=test-base64 test-md4 test-milenage \
+ALL=test-base64 test-md4 test-milenage \
 	test-rsa-sig-ver \
 	test-sha1 \
-	test-sha256 test-aes test-asn1 test-x509v3 test-list test-rc4
+	test-https test-https_server \
+	test-sha256 test-aes test-x509v3 test-list test-rc4 \
+	test-bss
 
-all: $(TESTS)
+include ../src/build.rules
 
 ifdef LIBFUZZER
 CC=clang
@@ -12,18 +14,6 @@ CFLAGS += -fsanitize=fuzzer,address,signed-integer-overflow,unsigned-integer-ove
 CFLAGS += -DTEST_LIBFUZZER
 LDFLAGS += -fsanitize=fuzzer,address,signed-integer-overflow,unsigned-integer-overflow
 TEST_FUZZ=y
-endif
-
-ifndef CC
-CC=gcc
-endif
-
-ifndef LDO
-LDO=$(CC)
-endif
-
-ifndef CFLAGS
-CFLAGS = -MMD -O2 -Wall -g
 endif
 
 ifdef TEST_FUZZ
@@ -41,18 +31,14 @@ CFLAGS += -I../src/utils
 SLIBS = ../src/utils/libutils.a
 
 DLIBS = ../src/crypto/libcrypto.a \
-	../src/common/libcommon.a \
-	../src/ap/libap.a \
-	../src/eapol_auth/libeapol_auth.a \
-	../src/eapol_supp/libeapol_supp.a \
-	../src/eap_peer/libeap_peer.a \
-	../src/eap_server/libeap_server.a \
-	../src/eap_common/libeap_common.a \
-	../src/radius/libradius.a \
-	../src/l2_packet/libl2_packet.a \
-	../src/wps/libwps.a \
-	../src/rsn_supp/librsn_supp.a \
 	../src/tls/libtls.a
+
+_OBJS_VAR := LLIBS
+include ../src/objs.mk
+_OBJS_VAR := SLIBS
+include ../src/objs.mk
+_OBJS_VAR := DLIBS
+include ../src/objs.mk
 
 LIBS = $(SLIBS) $(DLIBS)
 LLIBS = -Wl,--start-group $(DLIBS) -Wl,--end-group $(SLIBS)
@@ -60,99 +46,101 @@ LLIBS = -Wl,--start-group $(DLIBS) -Wl,--end-group $(SLIBS)
 # glibc < 2.17 needs -lrt for clock_gettime()
 LLIBS += -lrt
 
-../src/utils/libutils.a:
-	$(MAKE) -C ../src/utils
-
-../src/common/libcommon.a:
-	$(MAKE) -C ../src/common
-
-../src/crypto/libcrypto.a:
-	$(MAKE) -C ../src/crypto
-
-../src/tls/libtls.a:
-	$(MAKE) -C ../src/tls
-
-../src/ap/libap.a:
-	$(MAKE) -C ../src/ap
-
-../src/radius/libradius.a:
-	$(MAKE) -C ../src/radius
-
-../src/l2_packet/libl2_packet.a:
-	$(MAKE) -C ../src/l2_packet
-
-../src/wps/libwps.a:
-	$(MAKE) -C ../src/wps
-
-../src/eap_peer/libeap_peer.a:
-	$(MAKE) -C ../src/eap_peer
-
-../src/eap_server/libeap_server.a:
-	$(MAKE) -C ../src/eap_server
-
-../src/eap_common/libeap_common.a:
-	$(MAKE) -C ../src/eap_common
-
-../src/eapol_auth/libeapol_auth.a:
-	$(MAKE) -C ../src/eapol_auth
-
-../src/eapol_supp/libeapol_supp.a:
-	$(MAKE) -C ../src/eapol_supp
-
-../src/rsn_supp/librsn_supp.a:
-	$(MAKE) -C ../src/rsn_supp
-
-
-test-aes: test-aes.o $(LIBS)
+test-aes: $(call BUILDOBJ,test-aes.o) $(LIBS)
 	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
 
-test-asn1: test-asn1.o $(LIBS)
+test-base64: $(call BUILDOBJ,test-base64.o) $(LIBS)
 	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
 
-test-base64: test-base64.o $(LIBS)
-	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
-
-test-eapol: test-eapol.o $(LIBS)
+test-https: $(call BUILDOBJ,test-https.o) $(LIBS)
 	$(LDO) $(LDFLAGS) -o $@ $< $(LLIBS)
 
-test-https: test-https.o $(LIBS)
+test-https_server: $(call BUILDOBJ,test-https_server.o) $(LIBS)
 	$(LDO) $(LDFLAGS) -o $@ $< $(LLIBS)
 
-test-https_server: test-https_server.o $(LIBS)
+test-list: $(call BUILDOBJ,test-list.o) $(LIBS)
+	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
+
+test-md4: $(call BUILDOBJ,test-md4.o) $(LIBS)
+	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
+
+test-milenage: $(call BUILDOBJ,test-milenage.o) $(LIBS)
+	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
+
+test-rc4: $(call BUILDOBJ,test-rc4.o) $(LIBS)
+	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
+
+test-rsa-sig-ver: $(call BUILDOBJ,test-rsa-sig-ver.o) $(LIBS)
 	$(LDO) $(LDFLAGS) -o $@ $< $(LLIBS)
 
-test-json: test-json.o $(LIBS)
+test-sha1: $(call BUILDOBJ,test-sha1.o) $(LIBS)
 	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
 
-test-list: test-list.o $(LIBS)
+test-sha256: $(call BUILDOBJ,test-sha256.o) $(LIBS)
 	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
 
-test-md4: test-md4.o $(LIBS)
-	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
-
-test-milenage: test-milenage.o $(LIBS)
-	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
-
-test-rc4: test-rc4.o $(LIBS)
-	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
-
-test-rsa-sig-ver: test-rsa-sig-ver.o $(LIBS)
-	$(LDO) $(LDFLAGS) -o $@ $< $(LLIBS)
-
-test-sha1: test-sha1.o $(LIBS)
-	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
-
-test-sha256: test-sha256.o $(LIBS)
-	$(LDO) $(LDFLAGS) -o $@ $^ $(LLIBS)
-
-test-tls: test-tls.o $(LIBS)
-	$(LDO) $(LDFLAGS) -o $@ $< $(LLIBS)
-
-test-x509v3: test-x509v3.o $(LIBS)
+test-x509v3: $(call BUILDOBJ,test-x509v3.o) $(LIBS)
 	$(LDO) $(LDFLAGS) -o $@ $< $(LLIBS)
 
 
-run-tests: $(TESTS)
+# We could cut this down more by enabling fewer options (above)
+ELIBS += $(SRC)/crypto/libcrypto.a
+ELIBS += $(SRC)/tls/libtls.a
+
+WPAS_SRC=../wpa_supplicant
+SRC=../src
+WPA_LIBS = $(SRC)/common/libcommon.a
+
+CFLAGS += -I$(SRC) -I$(SRC)/utils -I$(WPAS_SRC)
+
+CFLAGS += -DCONFIG_DRIVER_NONE
+CFLAGS += -DIEEE8021X_EAPOL
+
+WPA_OBJS = $(WPAS_SRC)/bssid_ignore.o
+WPA_OBJS += $(WPAS_SRC)/bss.o
+WPA_OBJS += $(WPAS_SRC)/config.o
+WPA_OBJS += $(WPAS_SRC)/config_file.o
+WPA_OBJS += $(WPAS_SRC)/eap_register.o
+WPA_OBJS += $(WPAS_SRC)/events.o
+WPA_OBJS += $(WPAS_SRC)/notify.o
+WPA_OBJS += $(WPAS_SRC)/offchannel.o
+WPA_OBJS += $(WPAS_SRC)/op_classes.o
+WPA_OBJS += $(WPAS_SRC)/robust_av.o
+WPA_OBJS += $(WPAS_SRC)/rrm.o
+WPA_OBJS += $(WPAS_SRC)/scan.o
+WPA_OBJS += $(WPAS_SRC)/wmm_ac.o
+WPA_OBJS += $(WPAS_SRC)/wpa_supplicant.o
+WPA_OBJS += $(WPAS_SRC)/wpas_glue.o
+WPA_OBJS += $(SRC)/rsn_supp/wpa.o
+WPA_OBJS += $(SRC)/rsn_supp/wpa_ft.o
+WPA_OBJS += $(SRC)/rsn_supp/wpa_ie.o
+WPA_OBJS += $(SRC)/rsn_supp/tdls.o
+WPA_OBJS += $(SRC)/rsn_supp/preauth.o
+WPA_OBJS += $(SRC)/rsn_supp/pmksa_cache.o
+WPA_OBJS += $(SRC)/eapol_supp/eapol_supp_sm.o
+WPA_OBJS += $(SRC)/eap_common/eap_common.o
+WPA_OBJS += $(SRC)/eap_peer/eap.o
+WPA_OBJS += $(SRC)/eap_peer/eap_methods.o
+WPA_OBJS += $(SRC)/drivers/driver_common.o
+WPA_OBJS += $(SRC)/drivers/driver_none.o
+WPA_OBJS += $(SRC)/drivers/drivers.o
+WPA_OBJS += $(SRC)/l2_packet/l2_packet_none.o
+
+_OBJS_VAR := WPA_OBJS
+include ../src/objs.mk
+
+_OBJS_VAR := WPA_LIBS
+include ../src/objs.mk
+
+_OBJS_VAR := ELIBS
+include ../src/objs.mk
+
+LIBS=$(SLIBS) $(DLIBS) $(WPA_LIBS) $(ELIBS)
+
+test-bss: $(call BUILDOBJ,test-bss.o) $(WPA_OBJS) $(LIBS)
+	$(LDO) $(LDFLAGS) -o $@ $< $(LLIBS) $(WPA_CFLAGS) $(WPA_OBJS) $(LIBS)
+
+run-tests: $(ALL)
 	./test-aes
 	./test-list
 	./test-md4
@@ -160,17 +148,11 @@ run-tests: $(TESTS)
 	./test-rsa-sig-ver
 	./test-sha1
 	./test-sha256
+	./test-bss
 	@echo
 	@echo All tests completed successfully.
 
-clean:
-	$(MAKE) -C ../src clean
-	rm -f $(TESTS) *~ *.o *.d
-	rm -f test-eapol
-	rm -f test-https
-	rm -f test-json
-	rm -f test-tls
+clean: common-clean
+	rm -f *~
 	rm -f test_x509v3_nist.out.*
 	rm -f test_x509v3_nist2.out.*
-
--include $(OBJS:%.o=%.d)

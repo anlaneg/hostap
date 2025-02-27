@@ -452,9 +452,10 @@ static void wpa_driver_wext_event_wireless(struct wpa_driver_wext_data *drv,
 				   MAC2STR((u8 *) iwe->u.ap_addr.sa_data));
 			if (is_zero_ether_addr(
 				    (const u8 *) iwe->u.ap_addr.sa_data) ||
-			    os_memcmp(iwe->u.ap_addr.sa_data,
-				      "\x44\x44\x44\x44\x44\x44", ETH_ALEN) ==
-			    0) {
+			    ether_addr_equal((const u8 *)
+					     iwe->u.ap_addr.sa_data,
+					     (const u8 *)
+					     "\x44\x44\x44\x44\x44\x44")) {
 				os_free(drv->assoc_req_ies);
 				drv->assoc_req_ies = NULL;
 				os_free(drv->assoc_resp_ies);
@@ -1832,6 +1833,9 @@ static int wpa_driver_wext_set_key(void *priv,
 	const u8 *key = params->key;
 	size_t key_len = params->key_len;
 
+	if (params->key_flag & KEY_FLAG_NEXT)
+		return -1;
+
 	wpa_printf(MSG_DEBUG, "%s: alg=%d key_idx=%d set_tx=%d seq_len=%lu "
 		   "key_len=%lu",
 		   __FUNCTION__, alg, key_idx, set_tx,
@@ -2424,7 +2428,7 @@ static int wpa_driver_wext_signal_poll(void *priv, struct wpa_signal_info *si)
 	struct iwreq iwr;
 
 	os_memset(si, 0, sizeof(*si));
-	si->current_signal = -WPA_INVALID_NOISE;
+	si->data.signal = -WPA_INVALID_NOISE;
 	si->current_noise = WPA_INVALID_NOISE;
 	si->chanwidth = CHAN_WIDTH_UNKNOWN;
 
@@ -2440,7 +2444,7 @@ static int wpa_driver_wext_signal_poll(void *priv, struct wpa_signal_info *si)
 		return -1;
 	}
 
-	si->current_signal = stats.qual.level -
+	si->data.signal = stats.qual.level -
 		((stats.qual.updated & IW_QUAL_DBM) ? 0x100 : 0);
 	si->current_noise = stats.qual.noise -
 		((stats.qual.updated & IW_QUAL_DBM) ? 0x100 : 0);

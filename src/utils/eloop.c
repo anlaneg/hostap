@@ -793,23 +793,16 @@ int eloop_register_timeout(unsigned int secs/*定时器到期时间秒数*/, uns
 	}
 	now_sec = timeout->time.sec;
 	timeout->time.sec += secs;
-	if (timeout->time.sec < now_sec) {
+	if (timeout->time.sec < now_sec)
 		//过期时间过长，导致定时器时间越界
-		/*
-		 * Integer overflow - assume long enough timeout to be assumed
-		 * to be infinite, i.e., the timeout would never happen.
-		 */
-		wpa_printf(MSG_DEBUG, "ELOOP: Too long timeout (secs=%u) to "
-			   "ever happen - ignore it", secs);
-		os_free(timeout);
-		return 0;
-	}
+		goto overflow;
 	timeout->time.usec += usecs;
 	while (timeout->time.usec >= 1000000) {
 		timeout->time.sec++;
 		timeout->time.usec -= 1000000;
 	}
-
+	if (timeout->time.sec < now_sec)
+		goto overflow;
 	//填充定时器回调用参数
 	timeout->eloop_data = eloop_data;
 	timeout->user_data = user_data;
@@ -831,6 +824,17 @@ int eloop_register_timeout(unsigned int secs/*定时器到期时间秒数*/, uns
 	//链表为空时（或者自已最大时），直接加入到结尾
 	dl_list_add_tail(&eloop.timeout, &timeout->list);
 
+	return 0;
+
+overflow:
+	/*
+	 * Integer overflow - assume long enough timeout to be assumed
+	 * to be infinite, i.e., the timeout would never happen.
+	 */
+	wpa_printf(MSG_DEBUG,
+		   "ELOOP: Too long timeout (secs=%u usecs=%u) to ever happen - ignore it",
+		   secs,usecs);
+	os_free(timeout);
 	return 0;
 }
 

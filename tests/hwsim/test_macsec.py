@@ -115,8 +115,17 @@ def test_macsec_psk_256(dev, apdev, params):
     finally:
         cleanup_macsec()
 
+def test_macsec_gcm_aes_256(dev, apdev, params):
+    """MACsec PSK with GCM-AES-256"""
+    try:
+        cak = "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+        run_macsec_psk(dev, apdev, params, "macsec_gcm_aes_256",
+                       cak0=cak, cak1=cak, csindex=1)
+    finally:
+        cleanup_macsec()
+
 def set_mka_psk_config(dev, mka_priority=None, integ_only=False, port=None,
-                       ckn=None, cak=None):
+                       ckn=None, cak=None, csindex=None):
     dev.set("eapol_version", "3")
     dev.set("ap_scan", "0")
     dev.set("fast_reauth", "1")
@@ -137,10 +146,13 @@ def set_mka_psk_config(dev, mka_priority=None, integ_only=False, port=None,
         dev.set_network(id, "mka_priority", str(mka_priority))
     if port is not None:
         dev.set_network(id, "macsec_port", str(port))
+    if csindex is not None:
+        dev.set_network(id, "macsec_csindex", str(csindex))
 
     dev.select_network(id)
 
-def set_mka_eap_config(dev, mka_priority=None, integ_only=False, port=None):
+def set_mka_eap_config(dev, mka_priority=None, integ_only=False, port=None,
+                       eap_psk=False):
     dev.set("eapol_version", "3")
     dev.set("ap_scan", "0")
     dev.set("fast_reauth", "1")
@@ -157,12 +169,17 @@ def set_mka_eap_config(dev, mka_priority=None, integ_only=False, port=None):
         dev.set_network(id, "macsec_port", str(port))
 
     dev.set_network(id, "key_mgmt", "IEEE8021X")
-    dev.set_network(id, "eap", "TTLS")
-    dev.set_network_quoted(id, "ca_cert", "auth_serv/ca.pem")
-    dev.set_network_quoted(id, "phase2", "auth=MSCHAPV2")
-    dev.set_network_quoted(id, "anonymous_identity", "ttls")
-    dev.set_network_quoted(id, "identity", "DOMAIN\mschapv2 user")
-    dev.set_network_quoted(id, "password", "password")
+    if eap_psk:
+        dev.set_network(id, "eap", "PSK")
+        dev.set_network_quoted(id, "identity", "psk.user@example.com")
+        dev.set_network(id, "password", "0123456789abcdef0123456789abcdef")
+    else:
+        dev.set_network(id, "eap", "TTLS")
+        dev.set_network_quoted(id, "ca_cert", "auth_serv/ca.pem")
+        dev.set_network_quoted(id, "phase2", "auth=MSCHAPV2")
+        dev.set_network_quoted(id, "anonymous_identity", "ttls")
+        dev.set_network_quoted(id, "identity", "DOMAIN\\mschapv2 user")
+        dev.set_network_quoted(id, "password", "password")
 
     dev.select_network(id)
 
@@ -170,16 +187,14 @@ def log_ip_macsec():
     cmd = subprocess.Popen(["ip", "macsec", "show"],
                            stdout=subprocess.PIPE,
                            stderr=open('/dev/null', 'w'))
-    res = cmd.stdout.read().decode()
-    cmd.stdout.close()
-    logger.info("ip macsec:\n" + res)
+    out, err = cmd.communicate()
+    logger.info("ip macsec:\n" + out.decode())
 
 def log_ip_link():
     cmd = subprocess.Popen(["ip", "link", "show"],
                            stdout=subprocess.PIPE)
-    res = cmd.stdout.read().decode()
-    cmd.stdout.close()
-    logger.info("ip link:\n" + res)
+    out, err = cmd.communicate()
+    logger.info("ip link:\n" + out.decode())
 
 def add_veth():
     try:
@@ -264,7 +279,7 @@ def wait_mka_done(wpa, expect_failure=False, hostapd=False):
 
 def run_macsec_psk(dev, apdev, params, prefix, integ_only=False, port0=None,
                    port1=None, ckn0=None, ckn1=None, cak0=None, cak1=None,
-                   expect_failure=False):
+                   csindex=None, expect_failure=False):
     add_veth()
 
     cap_veth0 = os.path.join(params['logdir'], prefix + ".veth0.pcap")
@@ -284,9 +299,9 @@ def run_macsec_psk(dev, apdev, params, prefix, integ_only=False, port0=None,
     wpas1 = wpa[1]
 
     set_mka_psk_config(wpas0, integ_only=integ_only, port=port0, ckn=ckn0,
-                       cak=cak0)
+                       cak=cak0, csindex=csindex)
     set_mka_psk_config(wpas1, mka_priority=100, integ_only=integ_only,
-                       port=port1, ckn=ckn1, cak=cak1)
+                       port=port1, ckn=ckn1, cak=cak1, csindex=csindex)
 
     log_ip_macsec()
     log_ip_link()
@@ -492,48 +507,42 @@ def log_ip_macsec_ns():
     cmd = subprocess.Popen(["ip", "macsec", "show"],
                            stdout=subprocess.PIPE,
                            stderr=open('/dev/null', 'w'))
-    res = cmd.stdout.read().decode()
-    cmd.stdout.close()
-    logger.info("ip macsec show:\n" + res)
+    out, err = cmd.communicate()
+    logger.info("ip macsec show:\n" + out.decode())
 
     cmd = subprocess.Popen(["ip", "netns", "exec", "ns0",
                             "ip", "macsec", "show"],
                            stdout=subprocess.PIPE,
                            stderr=open('/dev/null', 'w'))
-    res = cmd.stdout.read().decode()
-    cmd.stdout.close()
-    logger.info("ip macsec show (ns0):\n" + res)
+    out, err = cmd.communicate()
+    logger.info("ip macsec show (ns0):\n" + out.decode())
 
     cmd = subprocess.Popen(["ip", "netns", "exec", "ns1",
                             "ip", "macsec", "show"],
                            stdout=subprocess.PIPE,
                            stderr=open('/dev/null', 'w'))
-    res = cmd.stdout.read().decode()
-    cmd.stdout.close()
-    logger.info("ip macsec show (ns1):\n" + res)
+    out, err = cmd.communicate()
+    logger.info("ip macsec show (ns1):\n" + out.decode())
 
 def log_ip_link_ns():
     cmd = subprocess.Popen(["ip", "link", "show"],
                            stdout=subprocess.PIPE)
-    res = cmd.stdout.read().decode()
-    cmd.stdout.close()
-    logger.info("ip link:\n" + res)
+    out, err = cmd.communicate()
+    logger.info("ip link:\n" + out.decode())
 
     cmd = subprocess.Popen(["ip", "netns", "exec", "ns0",
                             "ip", "link", "show"],
                            stdout=subprocess.PIPE,
                            stderr=open('/dev/null', 'w'))
-    res = cmd.stdout.read().decode()
-    cmd.stdout.close()
-    logger.info("ip link show (ns0):\n" + res)
+    out, err = cmd.communicate()
+    logger.info("ip link show (ns0):\n" + out.decode())
 
     cmd = subprocess.Popen(["ip", "netns", "exec", "ns1",
                             "ip", "link", "show"],
                            stdout=subprocess.PIPE,
                            stderr=open('/dev/null', 'w'))
-    res = cmd.stdout.read().decode()
-    cmd.stdout.close()
-    logger.info("ip link show (ns1):\n" + res)
+    out, err = cmd.communicate()
+    logger.info("ip link show (ns1):\n" + out.decode())
 
 def write_conf(conffile, mka_priority=None):
     with open(conffile, 'w') as f:
@@ -664,8 +673,8 @@ def run_macsec_psk_ns(dev, apdev, params):
     c = subprocess.Popen(['ip', 'netns', 'exec', 'ns0',
                           'ping', '-c', '2', '192.168.248.18'],
                          stdout=subprocess.PIPE)
-    res = c.stdout.read().decode()
-    c.stdout.close()
+    out, err = c.communicate()
+    res = out.decode()
     logger.info("ping:\n" + res)
     if "2 packets transmitted, 2 received" not in res:
         raise Exception("ping did not work")
@@ -813,8 +822,17 @@ def test_macsec_hostapd_eap(dev, apdev, params):
     finally:
         cleanup_macsec_hostapd()
 
+def test_macsec_hostapd_eap_psk(dev, apdev, params):
+    """MACsec EAP-PSK with hostapd"""
+    try:
+        run_macsec_hostapd_eap(dev, apdev, params, "macsec_hostapd_eap_psk",
+                               eap_psk=True)
+    finally:
+        cleanup_macsec_hostapd()
+
 def run_macsec_hostapd_eap(dev, apdev, params, prefix, integ_only=False,
-                           port0=None, port1=None, expect_failure=False):
+                           port0=None, port1=None, expect_failure=False,
+                           eap_psk=False):
     add_veth()
 
     cap_veth0 = os.path.join(params['logdir'], prefix + ".veth0.pcap")
@@ -833,7 +851,7 @@ def run_macsec_hostapd_eap(dev, apdev, params, prefix, integ_only=False,
     wpas0 = wpa[0]
 
     set_mka_eap_config(wpas0, integ_only=integ_only, port=port0,
-                       mka_priority=100)
+                       mka_priority=100, eap_psk=eap_psk)
 
     params = {"driver": "macsec_linux",
               "interface": "veth1",

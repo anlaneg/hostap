@@ -168,9 +168,11 @@ struct eapol_state_machine {
 
 	void *sta; /* station context pointer to use in callbacks */
 
-	int remediation;
-
 	u64 acct_multi_session_id;
+
+	unsigned int authenticated; /* The number of times authentication has
+				     * been completed successfully. */
+	bool stopped;
 };
 
 #endif /* EAPOL_AUTH_SM_I_H */

@@ -195,6 +195,11 @@ struct wps_config {
 	 * enrollee
 	 */
 	int multi_ap_backhaul_sta;
+
+	/*
+	 * multi_ap_profile - Get the Multi-AP Profile
+	 */
+	int multi_ap_profile;
 };
 
 struct wps_data * wps_init(const struct wps_config *cfg);
@@ -841,6 +846,10 @@ struct wps_context {
 	struct wpabuf *ap_nfc_dh_pubkey;
 	struct wpabuf *ap_nfc_dh_privkey;
 	struct wpabuf *ap_nfc_dev_pw;
+
+	/* Whether to send WPA2-PSK passphrase as a passphrase instead of PSK
+	 * for WPA3-Personal transition mode needs. */
+	bool use_passphrase;
 };
 
 struct wps_registrar *
@@ -873,6 +882,11 @@ int wps_registrar_add_nfc_password_token(struct wps_registrar *reg,
 					 const u8 *oob_dev_pw,
 					 size_t oob_dev_pw_len);
 void wps_registrar_flush(struct wps_registrar *reg);
+int wps_registrar_update_multi_ap(struct wps_registrar *reg,
+				  const u8 *multi_ap_backhaul_ssid,
+				  size_t multi_ap_backhaul_ssid_len,
+				  const u8 *multi_ap_backhaul_network_key,
+				  size_t multi_ap_backhaul_network_key_len);
 
 int wps_build_credential_wrap(struct wpabuf *msg,
 			      const struct wps_credential *cred);

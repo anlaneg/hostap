@@ -106,6 +106,7 @@ def perf_start_stop(host, setup_params, start):
 # hostapd/wpa_supplicant helpers
 def run_hostapd(host, setup_params):
     log_file = None
+    remote_cli = False
     try:
         tc_name = setup_params['tc_name']
         log_dir = setup_params['log_dir']
@@ -117,12 +118,29 @@ def run_hostapd(host, setup_params):
 
     if log_file:
         host.add_log(log_file)
-    status, buf = host.execute([setup_params['hostapd'], "-B", "-ddt", "-g", "udp:" + host.port, log])
+    pidfile = setup_params['log_dir'] + "hostapd_" + host.ifname + "_" + setup_params['tc_name'] + ".pid"
+
+    if 'remote_cli' in setup_params:
+        remote_cli = setup_params['remote_cli']
+
+    if remote_cli:
+        ctrl_global_path = '/var/run/hapd-global' + '-' + host.ifname
+        host.global_iface = ctrl_global_path
+        host.dev['remote_cli'] = True
+        host.dev['global_ctrl_override'] = ctrl_global_path
+    else:
+        ctrl_global_path = "udp:" + host.port
+        host.global_iface = "udp"
+        host.dev['remote_cli'] = False
+
+    status, buf = host.execute([setup_params['hostapd'], "-B", "-ddt", "-g",
+                                ctrl_global_path, "-P", pidfile, log])
     if status != 0:
         raise Exception("Could not run hostapd: " + buf)
 
 def run_wpasupplicant(host, setup_params):
     log_file = None
+    remote_cli = False
     try:
         tc_name = setup_params['tc_name']
         log_dir = setup_params['log_dir']
@@ -134,15 +152,33 @@ def run_wpasupplicant(host, setup_params):
 
     if log_file:
         host.add_log(log_file)
-    status, buf = host.execute([setup_params['wpa_supplicant'], "-B", "-ddt", "-g", "udp:" + host.port, log])
+    pidfile = setup_params['log_dir'] + "wpa_supplicant_" + host.ifname + "_" + setup_params['tc_name'] + ".pid"
+
+    if 'remote_cli' in setup_params:
+        remote_cli = setup_params['remote_cli']
+
+    if remote_cli:
+        ctrl_global_path = '/var/run/wpas-global' + "-" + host.ifname
+        host.global_iface = ctrl_global_path
+        host.remote_cli = True
+
+    if not remote_cli:
+        ctrl_global_path = "udp:" + host.port
+        host.global_iface = "udp"
+        host.remote_cli = False
+
+    status, buf = host.execute([setup_params['wpa_supplicant'], "-B", "-ddt",
+                                "-g", ctrl_global_path, "-P", pidfile, log])
     if status != 0:
         raise Exception("Could not run wpa_supplicant: " + buf)
 
 def kill_wpasupplicant(host, setup_params):
-    host.execute(['killall', setup_params['wpa_supplicant']])
+    pidfile = setup_params['log_dir'] + "wpa_supplicant_" + host.ifname + "_" + setup_params['tc_name'] + ".pid"
+    host.execute(["kill `cat " + pidfile + "`"])
 
 def kill_hostapd(host, setup_params):
-    host.execute(['killall', setup_params['hostapd']])
+    pidfile = setup_params['log_dir'] + "hostapd_" + host.ifname + "_" + setup_params['tc_name'] + ".pid"
+    host.execute(["kill `cat " + pidfile + "`"])
 
 def get_ap_params(channel="1", bw="HT20", country="US", security="open", ht_capab=None, vht_capab=None):
     ssid = "test_" + channel + "_" + security + "_" + bw
@@ -338,12 +374,12 @@ def ping_run(host, ip, result, ifname=None, addr_type="ipv4", deadline="5", qos=
 
     flush_arp_cache(host)
 
-    thread = host.execute_run(ping, result)
+    thread = host.thread_run(ping, result)
     return thread
 
 def ping_wait(host, thread, timeout=None):
-    host.wait_execute_complete(thread, timeout)
-    if thread.isAlive():
+    host.thread_wait(thread, timeout)
+    if thread.is_alive():
         raise Exception("ping thread still alive")
 
 def flush_arp_cache(host):
@@ -492,24 +528,24 @@ def iperf_run(server, client, server_ip, client_res, server_res,
     flush_arp_cache(server)
     flush_arp_cache(client)
 
-    server_thread = server.execute_run(iperf_server, server_res)
+    server_thread = server.thread_run(iperf_server, server_res)
     time.sleep(1)
-    client_thread = client.execute_run(iperf_client, client_res)
+    client_thread = client.thread_run(iperf_client, client_res)
 
     return server_thread, client_thread
 
 def iperf_wait(server, client, server_thread, client_thread, timeout=None, iperf="iperf"):
-    client.wait_execute_complete(client_thread, timeout)
-    if client_thread.isAlive():
+    client.thread_wait(client_thread, timeout)
+    if client_thread.is_alive():
         raise Exception("iperf client thread still alive")
 
-    server.wait_execute_complete(server_thread, 5)
-    if server_thread.isAlive():
+    server.thread_wait(server_thread, 5)
+    if server_thread.is_alive():
         server.execute(["killall", "-s", "INT", iperf])
         time.sleep(1)
 
-    server.wait_execute_complete(server_thread, 5)
-    if server_thread.isAlive():
+    server.thread_wait(server_thread, 5)
+    if server_thread.is_alive():
         raise Exception("iperf server thread still alive")
 
     return

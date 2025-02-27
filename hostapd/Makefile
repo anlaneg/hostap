@@ -1,10 +1,7 @@
-ifndef CC
-CC=gcc
-endif
+ALL=hostapd hostapd_cli
+CONFIG_FILE = .config
 
-ifndef CFLAGS
-CFLAGS = -MMD -O2 -Wall -g
-endif
+include ../src/build.rules
 
 ifdef LIBS
 # If LIBS is set with some global build system defaults, clone those for
@@ -29,8 +26,6 @@ CFLAGS += -I$(abspath ../src)
 CFLAGS += -I$(abspath ../src/utils)
 
 export BINDIR ?= /usr/local/bin/
-
--include .config
 
 ifndef CONFIG_NO_GITVER
 # Add VERSION_STR postfix for builds from a git repository
@@ -89,6 +84,7 @@ OBJS += ../src/ap/beacon.o
 OBJS += ../src/ap/bss_load.o
 OBJS += ../src/ap/neighbor_db.o
 OBJS += ../src/ap/rrm.o
+OBJS += ../src/common/ptksa_cache.o
 
 OBJS_c = hostapd_cli.o
 OBJS_c += ../src/common/wpa_ctrl.o
@@ -120,7 +116,7 @@ HOBJS += ../src/utils/trace.o
 LDFLAGS += -rdynamic
 CFLAGS += -funwind-tables
 ifdef CONFIG_WPA_TRACE_BFD
-CFLAGS += -DPACKAGE="hostapd" -DWPA_TRACE_BFD
+CFLAGS += -DPACKAGE="hostapd" -DWPA_TRACE_BFD -fno-inline -fno-optimize-sibling-calls
 LIBS += -lbfd -ldl -liberty -lz
 LIBS_c += -lbfd -ldl -liberty -lz
 LIBS_h += -lbfd -ldl -liberty -lz
@@ -172,7 +168,7 @@ OBJS += ../src/eapol_auth/eapol_auth_sm.o
 
 
 ifdef CONFIG_CODE_COVERAGE
-CFLAGS += -O0 -fprofile-arcs -ftest-coverage
+CFLAGS += -O0 -fprofile-arcs -ftest-coverage -U_FORTIFY_SOURCE
 LIBS += -lgcov
 LIBS_c += -lgcov
 LIBS_h += -lgcov
@@ -281,6 +277,8 @@ CFLAGS += -DCONFIG_OCV
 OBJS += ../src/common/ocv.o
 endif
 
+NEED_AES_UNWRAP=y
+
 ifdef CONFIG_IEEE80211R
 CFLAGS += -DCONFIG_IEEE80211R -DCONFIG_IEEE80211R_AP
 OBJS += ../src/ap/wpa_auth_ft.o
@@ -300,6 +298,8 @@ CFLAGS += -DCONFIG_SAE
 OBJS += ../src/common/sae.o
 ifdef CONFIG_SAE_PK
 CFLAGS += -DCONFIG_SAE_PK
+NEED_AES_SIV=y
+NEED_BASE64=y
 OBJS += ../src/common/sae_pk.o
 endif
 NEED_ECC=y
@@ -342,6 +342,12 @@ endif
 
 ifdef CONFIG_IEEE80211AC
 CFLAGS += -DCONFIG_IEEE80211AC
+endif
+
+ifdef CONFIG_IEEE80211BE
+CONFIG_IEEE80211AX=y
+CFLAGS += -DCONFIG_IEEE80211BE
+OBJS += ../src/ap/ieee802_11_eht.o
 endif
 
 ifdef CONFIG_IEEE80211AX
@@ -449,7 +455,7 @@ endif
 ifdef CONFIG_EAP_SIM_COMMON
 OBJS += ../src/eap_common/eap_sim_common.o
 # Example EAP-SIM/AKA interface for GSM/UMTS authentication. This can be
-# replaced with another file implementating the interface specified in
+# replaced with another file implementing the interface specified in
 # eap_sim_db.h.
 OBJS += ../src/eap_server/eap_sim_db.o
 NEED_FIPS186_2_PRF=y
@@ -598,6 +604,24 @@ NEED_ASN1=y
 ifdef CONFIG_DPP2
 CFLAGS += -DCONFIG_DPP2
 endif
+ifdef CONFIG_DPP3
+CFLAGS += -DCONFIG_DPP3
+endif
+endif
+
+ifdef CONFIG_NAN_USD
+OBJS += ../src/common/nan_de.o
+OBJS += ../src/ap/nan_usd_ap.o
+CFLAGS += -DCONFIG_NAN_USD
+endif
+
+ifdef CONFIG_PASN
+CFLAGS += -DCONFIG_PASN
+CFLAGS += -DCONFIG_PTKSA_CACHE
+NEED_HMAC_SHA256_KDF=y
+NEED_HMAC_SHA384_KDF=y
+NEED_SHA256=y
+NEED_SHA384=y
 endif
 
 ifdef CONFIG_EAP_IKEV2
@@ -659,6 +683,11 @@ ifdef CHAP
 OBJS += ../src/eap_common/chap.o
 endif
 
+ifdef CONFIG_RADIUS_TLS
+TLS_FUNCS=y
+CFLAGS += -DCONFIG_RADIUS_TLS
+endif
+
 ifdef TLS_FUNCS
 NEED_DES=y
 # Shared TLS functions (needed for EAP_TLS, EAP_PEAP, and EAP_TTLS)
@@ -680,6 +709,7 @@ CFLAGS += -DCONFIG_TLSV12
 endif
 
 ifeq ($(CONFIG_TLS), wolfssl)
+CFLAGS += -DCRYPTO_RSA_OAEP_SHA256
 CONFIG_CRYPTO=wolfssl
 ifdef TLS_FUNCS
 OBJS += ../src/crypto/tls_wolfssl.o
@@ -700,6 +730,7 @@ endif
 endif
 
 ifeq ($(CONFIG_TLS), openssl)
+CFLAGS += -DCRYPTO_RSA_OAEP_SHA256
 CONFIG_CRYPTO=openssl
 ifdef TLS_FUNCS
 OBJS += ../src/crypto/tls_openssl.o
@@ -924,9 +955,11 @@ endif
 ifdef NEED_AES_ENCBLOCK
 AESOBJS += ../src/crypto/aes-encblock.o
 endif
+ifneq ($(CONFIG_TLS), openssl)
 ifneq ($(CONFIG_TLS), linux)
 ifneq ($(CONFIG_TLS), wolfssl)
 AESOBJS += ../src/crypto/aes-omac1.o
+endif
 endif
 endif
 ifdef NEED_AES_UNWRAP
@@ -1031,6 +1064,17 @@ ifdef CONFIG_INTERNAL_RC4
 ifndef CONFIG_NO_RC4
 OBJS += ../src/crypto/rc4.o
 endif
+endif
+endif
+
+ifdef CONFIG_SAE
+ifdef NEED_SHA384
+# Need to add HMAC-SHA384 KDF as well, if SHA384 was enabled.
+NEED_HMAC_SHA384_KDF=y
+endif
+ifdef NEED_SHA512
+# Need to add HMAC-SHA512 KDF as well, if SHA512 was enabled.
+NEED_HMAC_SHA512_KDF=y
 endif
 endif
 
@@ -1164,6 +1208,9 @@ endif
 ifdef NEED_AP_MLME
 OBJS += ../src/ap/wmm.o
 OBJS += ../src/ap/ap_list.o
+OBJS += ../src/ap/comeback_token.o
+OBJS += ../src/pasn/pasn_responder.o
+OBJS += ../src/pasn/pasn_common.o
 OBJS += ../src/ap/ieee802_11.o
 OBJS += ../src/ap/hw_features.o
 OBJS += ../src/ap/dfs.o
@@ -1264,60 +1311,25 @@ ifdef CONFIG_NO_TKIP
 CFLAGS += -DCONFIG_NO_TKIP
 endif
 
-ALL=hostapd hostapd_cli
-
-all: verify_config $(ALL)
-
-Q=@
-E=echo
-ifeq ($(V), 1)
-Q=
-E=true
-endif
-ifeq ($(QUIET), 1)
-Q=@
-E=true
-endif
-
-ifdef CONFIG_CODE_COVERAGE
-%.o: %.c
-	@$(E) "  CC " $<
-	$(Q)cd $(dir $@); $(CC) -c -o $(notdir $@) $(CFLAGS) $(notdir $<)
-else
-%.o: %.c
-	$(Q)$(CC) -c -o $@ $(CFLAGS) $<
-	@$(E) "  CC " $<
-endif
-
-verify_config:
-	@if [ ! -r .config ]; then \
-		echo 'Building hostapd requires a configuration file'; \
-		echo '(.config). See README for more instructions. You can'; \
-		echo 'run "cp defconfig .config" to create an example'; \
-		echo 'configuration.'; \
-		exit 1; \
-	fi
-
 $(DESTDIR)$(BINDIR)/%: %
 	install -D $(<) $(@)
 
 install: $(addprefix $(DESTDIR)$(BINDIR)/,$(ALL))
 
-../src/drivers/build.hostapd:
-	@if [ -f ../src/drivers/build.wpa_supplicant ]; then \
-		$(MAKE) -C ../src/drivers clean; \
-	fi
-	@touch ../src/drivers/build.hostapd
+_OBJS_VAR := OBJS
+include ../src/objs.mk
 
-BCHECK=../src/drivers/build.hostapd
-
-hostapd: $(BCHECK) $(OBJS)
+hostapd: $(OBJS)
 	$(Q)$(CC) $(LDFLAGS) -o hostapd $(OBJS) $(LIBS)
 	@$(E) "  LD " $@
 
 ifdef CONFIG_WPA_TRACE
 OBJS_c += ../src/utils/trace.o
 endif
+
+_OBJS_VAR := OBJS_c
+include ../src/objs.mk
+
 hostapd_cli: $(OBJS_c)
 	$(Q)$(CC) $(LDFLAGS) -o hostapd_cli $(OBJS_c) $(LIBS_c)
 	@$(E) "  LD " $@
@@ -1366,6 +1378,8 @@ SOBJS += ../src/common/sae.o
 SOBJS += ../src/common/sae_pk.o
 SOBJS += ../src/common/dragonfly.o
 SOBJS += $(AESOBJS)
+SOBJS += ../src/crypto/sha384.o
+SOBJS += ../src/crypto/sha512.o
 SOBJS += ../src/crypto/sha256-prf.o
 SOBJS += ../src/crypto/sha384-prf.o
 SOBJS += ../src/crypto/sha512-prf.o
@@ -1373,6 +1387,17 @@ SOBJS += ../src/crypto/dh_groups.o
 SOBJS += ../src/crypto/sha256-kdf.o
 SOBJS += ../src/crypto/sha384-kdf.o
 SOBJS += ../src/crypto/sha512-kdf.o
+SOBJS += ../src/common/wpa_common.o
+SOBJS += ../src/crypto/random.o
+SOBJS += ../src/crypto/sha1-prf.o
+SOBJS += ../src/utils/eloop.o
+
+_OBJS_VAR := NOBJS
+include ../src/objs.mk
+_OBJS_VAR := HOBJS
+include ../src/objs.mk
+_OBJS_VAR := SOBJS
+include ../src/objs.mk
 
 nt_password_hash: $(NOBJS)
 	$(Q)$(CC) $(LDFLAGS) -o nt_password_hash $(NOBJS) $(LIBS_n)
@@ -1386,16 +1411,13 @@ sae_pk_gen: $(SOBJS)
 	$(Q)$(CC) $(LDFLAGS) -o sae_pk_gen $(SOBJS) $(LIBS_s)
 	@$(E) "  LD " $@
 
+.PHONY: lcov-html
 lcov-html:
-	lcov -c -d .. > lcov.info
+	lcov -c -d $(BUILDDIR) > lcov.info
 	genhtml lcov.info --output-directory lcov-html
 
-clean:
-	$(MAKE) -C ../src clean
-	rm -f core *~ *.o hostapd hostapd_cli nt_password_hash hlr_auc_gw
+clean: common-clean
+	rm -f core *~ nt_password_hash hlr_auc_gw
 	rm -f sae_pk_gen
-	rm -f *.d *.gcno *.gcda *.gcov
 	rm -f lcov.info
 	rm -rf lcov-html
-
--include $(OBJS:%.o=%.d)

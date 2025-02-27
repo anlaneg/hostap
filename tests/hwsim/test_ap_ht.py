@@ -871,11 +871,14 @@ def test_ap_require_ht(dev, apdev):
               "require_ht": "1"}
     hapd = hostapd.add_ap(apdev[0], params)
 
-    dev[1].connect("require-ht", key_mgmt="NONE", scan_freq="2412",
-                   disable_ht="1", wait_connect=False)
+    wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
+    wpas.interface_add("wlan5", drv_params="extra_bss_membership_selectors=127")
+
+    wpas.connect("require-ht", key_mgmt="NONE", scan_freq="2412",
+                 disable_ht="1", wait_connect=False)
     dev[0].connect("require-ht", key_mgmt="NONE", scan_freq="2412")
-    ev = dev[1].wait_event(["CTRL-EVENT-ASSOC-REJECT"])
-    dev[1].request("DISCONNECT")
+    ev = wpas.wait_event(["CTRL-EVENT-ASSOC-REJECT"])
+    wpas.request("DISCONNECT")
     if ev is None:
         raise Exception("Association rejection timed out")
     if "status_code=27" not in ev:
@@ -912,11 +915,14 @@ def test_ap_require_ht_limited_rates(dev, apdev):
               "require_ht": "1"}
     hapd = hostapd.add_ap(apdev[0], params)
 
-    dev[1].connect("require-ht", key_mgmt="NONE", scan_freq="2412",
-                   disable_ht="1", wait_connect=False)
+    wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
+    wpas.interface_add("wlan5", drv_params="extra_bss_membership_selectors=127")
+
+    wpas.connect("require-ht", key_mgmt="NONE", scan_freq="2412",
+                 disable_ht="1", wait_connect=False)
     dev[0].connect("require-ht", key_mgmt="NONE", scan_freq="2412")
-    ev = dev[1].wait_event(["CTRL-EVENT-ASSOC-REJECT"])
-    dev[1].request("DISCONNECT")
+    ev = wpas.wait_event(["CTRL-EVENT-ASSOC-REJECT"])
+    wpas.request("DISCONNECT")
     if ev is None:
         raise Exception("Association rejection timed out")
     if "status_code=27" not in ev:
@@ -937,7 +943,8 @@ def test_ap_ht_40mhz_intolerant_sta(dev, apdev):
     clear_scan_cache(apdev[0])
     params = {"ssid": "intolerant",
               "channel": "6",
-              "ht_capab": "[HT40-]"}
+              "ht_capab": "[HT40-]",
+              "obss_interval": "2"}
     hapd = hostapd.add_ap(apdev[0], params)
     if hapd.get_status_field("num_sta_ht40_intolerant") != "0":
         raise Exception("Unexpected num_sta_ht40_intolerant value")
@@ -959,7 +966,7 @@ def test_ap_ht_40mhz_intolerant_sta(dev, apdev):
         raise Exception("Unexpected secondary_channel (did not disable 40 MHz)")
 
     dev[2].request("DISCONNECT")
-    time.sleep(1)
+    time.sleep(12)
     if hapd.get_status_field("num_sta_ht40_intolerant") != "0":
         raise Exception("Unexpected num_sta_ht40_intolerant value (expected 0)")
     if hapd.get_status_field("secondary_channel") != "-1":
@@ -1231,17 +1238,26 @@ def test_prefer_ht20(dev, apdev):
 
 def test_prefer_ht40(dev, apdev):
     """Preference on HT40 over HT20"""
+    hostapd.cmd_execute(apdev[1], ['ifconfig', apdev[1]['ifname'], 'up'])
+    hostapd.cmd_execute(apdev[1], ['iw', apdev[1]['ifname'], 'scan',
+                                   'flush', 'freq', '2417'])
+    time.sleep(1)
+    hostapd.cmd_execute(apdev[1], ['ifconfig', apdev[1]['ifname'], 'down'])
+
     params = {"ssid": "test",
               "channel": "1",
               "ieee80211n": "1"}
     hapd = hostapd.add_ap(apdev[0], params)
     bssid = apdev[0]['bssid']
+
     params = {"ssid": "test",
               "channel": "1",
               "ieee80211n": "1",
               "ht_capab": "[HT40+]"}
     hapd2 = hostapd.add_ap(apdev[1], params)
     bssid2 = apdev[1]['bssid']
+    if hapd2.get_status_field("secondary_channel") != "1":
+        raise Exception("AP2 did not enable HT40+")
 
     dev[0].scan_for_bss(bssid, freq=2412)
     dev[0].scan_for_bss(bssid2, freq=2412)
@@ -1370,13 +1386,15 @@ def test_ap_ht40_scan_broken_ap(dev, apdev):
     hwsim_utils.test_connectivity(dev[1], hapd2)
 
 def run_op_class(dev, apdev, hw_mode, channel, country, ht_capab, sec_chan,
-                 freq, opclass):
+                 freq, opclass, use_op_class=False):
     clear_scan_cache(apdev[0])
     try:
         params = {"ssid": "test-ht40",
                   "hw_mode": hw_mode,
                   "channel": channel,
                   "ht_capab": ht_capab}
+        if use_op_class:
+            params['op_class'] = str(opclass)
         if country:
             params['country_code'] = country
         hapd = hostapd.add_ap(apdev[0], params, wait_enabled=False)
@@ -1397,6 +1415,7 @@ def run_op_class(dev, apdev, hw_mode, channel, country, ht_capab, sec_chan,
         if rx_opclass != opclass:
             raise Exception("Unexpected operating class: %d" % rx_opclass)
         hapd.disable()
+        hapd.dump_monitor()
         dev[0].request("REMOVE_NETWORK all")
         dev[0].request("ABORT_SCAN")
         dev[0].wait_disconnected()
@@ -1406,68 +1425,100 @@ def run_op_class(dev, apdev, hw_mode, channel, country, ht_capab, sec_chan,
         time.sleep(0.1)
 
 def test_ap_ht_op_class_81(dev, apdev):
-    """HT20 on operationg class 81"""
-    run_op_class(dev, apdev, "g", "1", None, "", "0", "2412", 81)
+    """HT20 on operating class 81"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "g", "1", None, "", "0", "2412", 81,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_83(dev, apdev):
-    """HT40 on operationg class 83"""
-    run_op_class(dev, apdev, "g", "1", None, "[HT40+]", "1", "2412", 83)
+    """HT40 on operating class 83"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "g", "1", None, "[HT40+]", "1", "2412", 83,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_84(dev, apdev):
-    """HT40 on operationg class 84"""
-    run_op_class(dev, apdev, "g", "11", None, "[HT40-]", "-1", "2462", 84)
+    """HT40 on operating class 84"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "g", "11", None, "[HT40-]", "-1", "2462", 84,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_115(dev, apdev):
-    """HT20 on operationg class 115"""
-    run_op_class(dev, apdev, "a", "36", "FI", "", "0", "5180", 115)
+    """HT20 on operating class 115"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "36", "FI", "", "0", "5180", 115,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_116(dev, apdev):
-    """HT40 on operationg class 116"""
-    run_op_class(dev, apdev, "a", "36", "FI", "[HT40+]", "1", "5180", 116)
+    """HT40 on operating class 116"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "36", "FI", "[HT40+]", "1", "5180", 116,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_117(dev, apdev):
-    """HT40 on operationg class 117"""
-    run_op_class(dev, apdev, "a", "40", "FI", "[HT40-]", "-1", "5200", 117)
+    """HT40 on operating class 117"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "40", "FI", "[HT40-]", "-1", "5200", 117,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_118(dev, apdev):
-    """HT20 on operationg class 118"""
-    run_op_class(dev, apdev, "a", "60", "RS", "", "0", "5300", 118)
+    """HT20 on operating class 118"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "60", "PA", "", "0", "5300", 118,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_119(dev, apdev):
-    """HT40 on operationg class 119"""
-    run_op_class(dev, apdev, "a", "60", "RS", "[HT40+]", "1", "5300", 119)
+    """HT40 on operating class 119"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "60", "PA", "[HT40+]", "1", "5300", 119,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_120(dev, apdev):
-    """HT40 on operationg class 120"""
-    run_op_class(dev, apdev, "a", "64", "RS", "[HT40-]", "-1", "5320", 120)
+    """HT40 on operating class 120"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "64", "PA", "[HT40-]", "-1", "5320", 120,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_121(dev, apdev):
-    """HT20 on operationg class 121"""
-    run_op_class(dev, apdev, "a", "100", "ZA", "", "0", "5500", 121)
+    """HT20 on operating class 121"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "100", "ZA", "", "0", "5500", 121,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_122(dev, apdev):
-    """HT40 on operationg class 122"""
-    run_op_class(dev, apdev, "a", "100", "ZA", "[HT40+]", "1", "5500", 122)
+    """HT40 on operating class 122"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "100", "ZA", "[HT40+]", "1", "5500", 122,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_123(dev, apdev):
-    """HT40 on operationg class 123"""
-    run_op_class(dev, apdev, "a", "104", "ZA", "[HT40-]", "-1", "5520", 123)
+    """HT40 on operating class 123"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "104", "ZA", "[HT40-]", "-1", "5520", 123,
+                     use_op_class=o)
 
-def test_ap_ht_op_class_124(dev, apdev):
-    """HT20 on operationg class 124"""
-    run_op_class(dev, apdev, "a", "149", "US", "", "0", "5745", 124)
+def test_ap_ht_op_class_125_chan149(dev, apdev):
+    """HT20 on operating class 125 with channel 149"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "149", "US", "", "0", "5745", 125,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_125(dev, apdev):
-    """HT20 on operationg class 125"""
-    run_op_class(dev, apdev, "a", "169", "NL", "", "0", "5845", 125)
+    """HT20 on operating class 125"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "169", "NL", "", "0", "5845", 125,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_126(dev, apdev):
-    """HT40 on operationg class 126"""
-    run_op_class(dev, apdev, "a", "149", "US", "[HT40+]", "1", "5745", 126)
+    """HT40 on operating class 126"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "149", "US", "[HT40+]", "1", "5745", 126,
+                     use_op_class=o)
 
 def test_ap_ht_op_class_127(dev, apdev):
-    """HT40 on operationg class 127"""
-    run_op_class(dev, apdev, "a", "153", "US", "[HT40-]", "-1", "5765", 127)
+    """HT40 on operating class 127"""
+    for o in [False, True]:
+        run_op_class(dev, apdev, "a", "153", "US", "[HT40-]", "-1", "5765", 127,
+                     use_op_class=o)
 
 def test_ap_ht40_plus_minus1(dev, apdev):
     """HT40 with both plus and minus allowed (1)"""

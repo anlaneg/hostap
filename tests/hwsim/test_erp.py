@@ -11,14 +11,9 @@ import os
 import time
 
 import hostapd
-from utils import HwsimSkip, alloc_fail, fail_test, wait_fail_trigger
-from test_ap_eap import int_eap_server_params
+from utils import *
+from test_ap_eap import int_eap_server_params, check_tls13_support
 from test_ap_psk import find_wpas_process, read_process_memory, verify_not_present, get_key_locations
-
-def check_erp_capa(dev):
-    capab = dev.get_capability("erp")
-    if not capab or 'ERP' not in capab:
-        raise HwsimSkip("ERP not supported in the build")
 
 def test_erp_initiate_reauth_start(dev, apdev):
     """Authenticator sending EAP-Initiate/Re-auth-Start, but ERP disabled on peer"""
@@ -132,10 +127,10 @@ def start_erp_as(erp_domain="example.com", msk_dump=None, tls13=False,
     apdev = {'ifname': 'as-erp'}
     return hostapd.add_ap(apdev, params, driver="none")
 
-def test_erp_radius(dev, apdev):
+def test_erp_radius(dev, apdev, params):
     """ERP enabled on RADIUS server and peer"""
     check_erp_capa(dev[0])
-    start_erp_as()
+    start_erp_as(msk_dump=params['prefix'] + ".msk")
     params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
     params['auth_server_port'] = "18128"
     params['erp_send_reauth_start'] = '1'
@@ -312,7 +307,7 @@ def test_erp_radius_eap_methods(dev, apdev):
                  phase2="auth=MSCHAPV2")
         erp_test(dev[0], hapd, eap="TEAP", identity="erp-teap@example.com",
                  password="password", ca_cert="auth_serv/ca.pem",
-                 phase2="auth=MSCHAPV2", pac_file="blob://teap_pac")
+                 phase2="auth=MSCHAPV2")
     erp_test(dev[0], hapd, eap="PSK", identity="erp-psk@example.com",
              password_hex="0123456789abcdef0123456789abcdef")
     if "PWD" in eap_methods:
@@ -334,9 +329,7 @@ def test_erp_radius_eap_methods(dev, apdev):
 def test_erp_radius_eap_tls_v13(dev, apdev):
     """ERP enabled on RADIUS server and peer using EAP-TLS v1.3"""
     check_erp_capa(dev[0])
-    tls = dev[0].request("GET tls_library")
-    if "run=OpenSSL 1.1.1" not in tls:
-        raise HwsimSkip("No TLS v1.3 support in TLS library")
+    check_tls13_support(dev[0])
 
     eap_methods = dev[0].get_capability("eap")
     start_erp_as(tls13=True)

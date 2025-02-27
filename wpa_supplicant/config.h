@@ -18,6 +18,7 @@
 #define DEFAULT_USER_MPM 1
 #define DEFAULT_MAX_PEER_LINKS 99
 #define DEFAULT_MESH_MAX_INACTIVITY 300
+#define DEFAULT_MESH_FWDING 1
 /*
  * The default dot11RSNASAERetransPeriod is defined as 40 ms in the standard,
  * but use 1000 ms in practice to avoid issues on low power CPUs.
@@ -45,6 +46,8 @@
 #define DEFAULT_DISASSOC_IMMINENT_RSSI_THRESHOLD -75
 #define DEFAULT_OCE_SUPPORT OCE_STA
 #define DEFAULT_EXTENDED_KEY_ID 0
+#define DEFAULT_SCAN_RES_VALID_FOR_CONNECT 5
+#define DEFAULT_MLD_CONNECT_BAND_PREF MLD_CONNECT_BAND_PREF_AUTO
 
 #include "config_ssid.h"
 #include "wps/wps.h"
@@ -179,6 +182,51 @@ struct wpa_cred {
 	char *milenage;
 
 	/**
+	 * imsi_privacy_cert - IMSI privacy certificate
+	 *
+	 * This field is used with EAP-SIM/AKA/AKA' to encrypt the permanent
+	 * identity (IMSI) to improve privacy. The referenced PEM-encoded
+	 * X.509v3 certificate needs to include a 2048-bit RSA public key and
+	 * this is from the operator who authenticates the SIM/USIM.
+	 */
+	char *imsi_privacy_cert;
+
+	/**
+	 * imsi_privacy_attr - IMSI privacy attribute
+	 *
+	 * This field is used to help the EAP-SIM/AKA/AKA' server to identify
+	 * the used certificate (and as such, the matching private key). This
+	 * is set to an attribute in name=value format if the operator needs
+	 * this information.
+	 */
+	char *imsi_privacy_attr;
+
+	/**
+	 * engine - Use an engine for private key operations
+	 */
+	int engine;
+
+	/**
+	 * engine_id - String identifying the engine to use
+	 */
+	char *engine_id;
+
+	/**
+	 * ca_cert_id - The CA certificate identifier when using an engine
+	 */
+	char *ca_cert_id;
+
+	/**
+	 * cert_id - The certificate identifier when using an engine
+	 */
+	char *cert_id;
+
+	/**
+	 * key_id - The private key identifier when using an engine
+	 */
+	char *key_id;
+
+	/**
 	 * domain_suffix_match - Constraint for server domain name
 	 *
 	 * If set, this FQDN is used as a suffix match requirement for the AAA
@@ -212,36 +260,50 @@ struct wpa_cred {
 	size_t num_domain;
 
 	/**
-	 * roaming_consortium - Roaming Consortium OI
+	 * home_ois - Home OIs
 	 *
-	 * If roaming_consortium_len is non-zero, this field contains the
-	 * Roaming Consortium OI that can be used to determine which access
-	 * points support authentication with this credential. This is an
-	 * alternative to the use of the realm parameter. When using Roaming
-	 * Consortium to match the network, the EAP parameters need to be
-	 * pre-configured with the credential since the NAI Realm information
-	 * may not be available or fetched.
+	 * If num_home_ois is non-zero, this field contains the set of Home OIs
+	 * that can be use to determine which access points support
+	 * authentication with this credential. These are an alternative to the
+	 * use of the realm parameter. When using Home OIs to match the network,
+	 * the EAP parameters need to be pre-configured with the credentials
+	 * since the NAI Realm information may not be available or fetched.
+	 * A successful authentication with the access point is possible as soon
+	 * as at least one Home OI from the list matches an OI in the Roaming
+	 * Consortium list advertised by the access point.
+	 * (Hotspot 2.0 PerProviderSubscription/<X+>/HomeSP/HomeOIList/<X+>/HomeOI)
 	 */
-	u8 roaming_consortium[15];
+	u8 home_ois[MAX_ROAMING_CONS][MAX_ROAMING_CONS_OI_LEN];
 
 	/**
-	 * roaming_consortium_len - Length of roaming_consortium
+	 * home_ois_len - Length of home_ois[i]
 	 */
-	size_t roaming_consortium_len;
+	size_t home_ois_len[MAX_ROAMING_CONS];
 
 	/**
-	 * required_roaming_consortium - Required Roaming Consortium OI
+	 * num_home_ois - Number of entries in home_ois
+	 */
+	unsigned int num_home_ois;
+
+	/**
+	 * required_home_ois - Required Home OI(s)
 	 *
-	 * If required_roaming_consortium_len is non-zero, this field contains
-	 * the Roaming Consortium OI that is required to be advertised by the AP
-	 * for the credential to be considered matching.
+	 * If required_home_ois_len is non-zero, this field contains the set of
+	 * Home OI(s) that are required to be advertised by the AP for the
+	 * credential to be considered matching.
+	 * (Hotspot 2.0 PerProviderSubscription/<X+>/HomeSP/HomeOIList/<X+>/HomeOIRequired)
 	 */
-	u8 required_roaming_consortium[15];
+	u8 required_home_ois[MAX_ROAMING_CONS][MAX_ROAMING_CONS_OI_LEN];
 
 	/**
-	 * required_roaming_consortium_len - Length of required_roaming_consortium
+	 * required_home_ois_len - Length of required_home_ois
 	 */
-	size_t required_roaming_consortium_len;
+	size_t required_home_ois_len[MAX_ROAMING_CONS];
+
+	/**
+	 * num_required_home_ois - Number of entries in required_home_ois
+	 */
+	unsigned int num_required_home_ois;
 
 	/**
 	 * roaming_consortiums - Roaming Consortium OI(s) memberships
@@ -355,6 +417,47 @@ struct wpa_cred {
 	int sim_num;
 };
 
+struct wpa_dev_ik {
+	/**
+	 * next - Next device identity in the list
+	 *
+	 * This pointer can be used to iterate over all device identity keys.
+	 * The head of this list is stored in the dev_ik field of struct
+	 * wpa_config.
+	 */
+	struct wpa_dev_ik *next;
+
+	/**
+	 * id - Unique id for the identity
+	 *
+	 * This identifier is used as a unique identifier for each identity
+	 * block when using the control interface. Each identity is allocated
+	 * an id when it is being created, either when reading the
+	 * configuration file or when a new identity is added.
+	 */
+	int id;
+
+	/**
+	 * dik_cipher - Device identity key cipher version
+	 */
+	int dik_cipher;
+
+	/**
+	 * dik - Device identity key which is unique for the device
+	 */
+	struct wpabuf *dik;
+
+	/**
+	 * pmk - PMK associated with the previous connection with the device
+	 */
+	struct wpabuf *pmk;
+
+	/**
+	 * pmkid - PMKID used in the previous connection with the device
+	 */
+	struct wpabuf *pmkid;
+};
+
 
 #define CFG_CHANGED_DEVICE_NAME BIT(0)
 #define CFG_CHANGED_CONFIG_METHODS BIT(1)
@@ -376,6 +479,8 @@ struct wpa_cred {
 #define CFG_CHANGED_SCHED_SCAN_PLANS BIT(17)
 #define CFG_CHANGED_WOWLAN_TRIGGERS BIT(18)
 #define CFG_CHANGED_DISABLE_BTM BIT(19)
+#define CFG_CHANGED_BGSCAN BIT(20)
+#define CFG_CHANGED_FT_PREPEND_PMKID BIT(21)
 
 /**
  * struct wpa_config - wpa_supplicant configuration data
@@ -553,6 +658,7 @@ struct wpa_config {
 	 */
 	int fast_reauth;
 
+#ifndef CONFIG_OPENSC_ENGINE_PATH
 	/**
 	 * opensc_engine_path - Path to the OpenSSL engine for opensc
 	 *
@@ -560,7 +666,9 @@ struct wpa_config {
 	 * engine (engine_opensc.so); if %NULL, this engine is not loaded.
 	 */
 	char *opensc_engine_path;
+#endif /* CONFIG_OPENSC_ENGINE_PATH */
 
+#ifndef CONFIG_PKCS11_ENGINE_PATH
 	/**
 	 * pkcs11_engine_path - Path to the OpenSSL engine for PKCS#11
 	 *
@@ -568,7 +676,9 @@ struct wpa_config {
 	 * engine (engine_pkcs11.so); if %NULL, this engine is not loaded.
 	 */
 	char *pkcs11_engine_path;
+#endif /* CONFIG_PKCS11_ENGINE_PATH */
 
+#ifndef CONFIG_PKCS11_MODULE_PATH
 	/**
 	 * pkcs11_module_path - Path to the OpenSSL OpenSC/PKCS#11 module
 	 *
@@ -577,6 +687,7 @@ struct wpa_config {
 	 * module is not loaded.
 	 */
 	char *pkcs11_module_path;
+#endif /* CONFIG_PKCS11_MODULE_PATH */
 
 	/**
 	 * openssl_ciphers - OpenSSL cipher string
@@ -644,12 +755,20 @@ struct wpa_config {
 	unsigned int dot11RSNAConfigSATimeout;
 
 	/**
+	 * ft_prepend_pmkid - Whether to prepend PMKR1Name with PMKIDs
+	 *
+	 * This control whether PMKR1Name is prepended to the PMKID list
+	 * insread of replacing the full list when constructing RSNE for
+	 * EAPOL-Key msg 2/4 for FT cases. */
+	bool ft_prepend_pmkid;
+
+	/**
 	 * update_config - Is wpa_supplicant allowed to update configuration
 	 *
 	 * This variable control whether wpa_supplicant is allow to re-write
 	 * its configuration with wpa_config_write(). If this is zero,
 	 * configuration data is only changed in memory and the external data
-	 * is not overriden. If this is non-zero, wpa_supplicant will update
+	 * is not overridden. If this is non-zero, wpa_supplicant will update
 	 * the configuration data (e.g., a file) whenever configuration is
 	 * changed. This update may replace the old configuration which can
 	 * remove comments from it in case of a text file configuration.
@@ -778,6 +897,16 @@ struct wpa_config {
 	int p2p_add_cli_chan;
 	int p2p_ignore_shared_freq;
 	int p2p_optimize_listen_chan;
+
+	int p2p_6ghz_disable;
+	bool p2p_pairing_setup;
+	bool p2p_pairing_cache;
+	int p2p_bootstrap_methods;
+	int p2p_pasn_type;
+	int p2p_comeback_after;
+	bool p2p_twt_power_mgmt;
+	bool p2p_chan_switch_req_enable;
+	int p2p_reg_info;
 
 	struct wpabuf *wps_vendor_ext_m1;
 
@@ -914,12 +1043,34 @@ struct wpa_config {
 	int *freq_list;
 
 	/**
+	 * initial_freq_list - like freq_list but for initial scan
+	 *
+	 * This is an optional zero-terminated array of frequencies in
+	 * megahertz (MHz) to allow for narrowing scanning range when
+	 * the application is started.
+	 *
+	 * This can be used to speed up initial connection time if the
+	 * channel is known ahead of time, without limiting the scanned
+	 * frequencies during normal use.
+	 */
+	int *initial_freq_list;
+
+	/**
 	 * scan_cur_freq - Whether to scan only the current channel
 	 *
 	 * If true, attempt to scan only the current channel if any other
 	 * VIFs on this radio are already associated on a particular channel.
 	 */
 	int scan_cur_freq;
+
+	/**
+	 * scan_res_valid_for_connect - Seconds scans are valid for association
+	 *
+	 * This configures the number of seconds old scan results are considered
+	 * valid for association. When scan results are older than this value
+	 * a new scan is triggered prior to the association.
+	 */
+	int scan_res_valid_for_connect;
 
 	/**
 	 * changed_parameters - Bitmap of changed parameters since last update
@@ -974,7 +1125,7 @@ struct wpa_config {
 	int go_venue_type;
 
 	/**
-	 * hessid - Homogenous ESS identifier
+	 * hessid - Homogeneous ESS identifier
 	 *
 	 * If this is set (any octet is non-zero), scans will be used to
 	 * request response only from BSSes belonging to the specified
@@ -1167,6 +1318,25 @@ struct wpa_config {
 	enum mfp_options pmf;
 
 	/**
+	 * sae_check_mfp - Whether to limit SAE based on PMF capabilities
+	 *
+	 * With this check SAE key_mgmt will not be selected if PMF is
+	 * not enabled.
+	 * Scenarios where enabling this check will limit SAE:
+	 *  1) ieee8011w=0 is set for the network.
+	 *  2) The AP does not have PMF enabled.
+	 *  3) ieee8011w for the network is the default(3), pmf=1 is enabled
+	 *     globally and the device does not support the BIP cipher.
+	 *
+	 * Useful to allow the BIP cipher check that occurs for ieee80211w=3
+	 * and pmf=1 to also avoid using SAE key_mgmt.
+	 * Useful when hardware does not support BIP to still to allow
+	 * connecting to sae_require_mfp=1 WPA2+WPA3-Personal transition mode
+	 *access points by automatically selecting PSK instead of SAE.
+	 */
+	int sae_check_mfp;
+
+	/**
 	 * sae_groups - Preference list of enabled groups for SAE
 	 *
 	 * By default (if this parameter is not set), the mandatory group 19
@@ -1182,7 +1352,7 @@ struct wpa_config {
 	 * 1 = hash-to-element only
 	 * 2 = both hunting-and-pecking loop and hash-to-element enabled
 	 */
-	int sae_pwe;
+	enum sae_pwe sae_pwe;
 
 	/**
 	 * sae_pmkid_in_assoc - Whether to include PMKID in SAE Assoc Req
@@ -1214,6 +1384,17 @@ struct wpa_config {
 	 * elements (id+len+payload for one or more elements).
 	 */
 	struct wpabuf *ap_vendor_elements;
+
+	/**
+	 * ap_assocresp_elements: Vendor specific elements for (Re)Association
+	 * Response frames
+	 *
+	 * This parameter can be used to define additional vendor specific
+	 * elements for (Re)Association Response frames in AP/P2P GO mode. The
+	 * format for these element(s) is a hexdump of the raw information
+	 * elements (id+len+payload for one or more elements).
+	 */
+	struct wpabuf *ap_assocresp_elements;
 
 	/**
 	 * ignore_old_scan_res - Ignore scan results older than request
@@ -1255,15 +1436,6 @@ struct wpa_config {
 	u8 ip_addr_end[4];
 
 	/**
-	 * osu_dir - OSU provider information directory
-	 *
-	 * If set, allow FETCH_OSU control interface command to be used to fetch
-	 * OSU provider information into all APs and store the results in this
-	 * directory.
-	 */
-	char *osu_dir;
-
-	/**
 	 * wowlan_triggers - Wake-on-WLAN triggers
 	 *
 	 * If set, these wowlan triggers will be configured.
@@ -1291,7 +1463,7 @@ struct wpa_config {
 	 * the per-network mac_addr parameter. Global mac_addr=1 can be used to
 	 * change this default behavior.
 	 */
-	int mac_addr;
+	enum wpas_mac_addr_style mac_addr;
 
 	/**
 	 * rand_addr_lifetime - Lifetime of random MAC address in seconds
@@ -1305,7 +1477,7 @@ struct wpa_config {
 	 * 1 = use random MAC address
 	 * 2 = like 1, but maintain OUI (with local admin bit set)
 	 */
-	int preassoc_mac_addr;
+	enum wpas_mac_addr_style preassoc_mac_addr;
 
 	/**
 	 * key_mgmt_offload - Use key management offload
@@ -1350,6 +1522,14 @@ struct wpa_config {
 	 * By default: 300 seconds.
 	 */
 	int mesh_max_inactivity;
+
+	/**
+	 * mesh_fwding - Mesh network layer-2 forwarding (dot11MeshForwarding)
+	 *
+	 * This controls whether to enable layer-2 forwarding.
+	 * By default: 1: enabled
+	 */
+	int mesh_fwding;
 
 	/**
 	 * dot11RSNASAERetransPeriod - Timeout to retransmit SAE Auth frame
@@ -1499,7 +1679,7 @@ struct wpa_config {
 	 * 1 = use random MAC address
 	 * 2 = like 1, but maintain OUI (with local admin bit set)
 	 */
-	int gas_rand_mac_addr;
+	enum wpas_mac_addr_style gas_rand_mac_addr;
 
 	/**
 	 * dpp_config_processing - How to process DPP configuration
@@ -1527,6 +1707,25 @@ struct wpa_config {
 	char *dpp_mud_url;
 
 	/**
+	 * dpp_extra_conf_req_name - JSON node name of additional data for
+	 * Enrollee's DPP Configuration Request
+	 */
+	char *dpp_extra_conf_req_name;
+
+	/**
+	 * dpp_extra_conf_req_value - JSON node data of additional data for
+	 * Enrollee's DPP Configuration Request
+	 */
+	char *dpp_extra_conf_req_value;
+
+	/* dpp_connector_privacy_default - Default valur for Connector privacy
+	 *
+	 * This value is used as the default for the dpp_connector_privacy
+	 * network parameter for all new networks provisioned using DPP.
+	 */
+	int dpp_connector_privacy_default;
+
+	/**
 	 * coloc_intf_reporting - Colocated interference reporting
 	 *
 	 * dot11CoLocIntfReportingActivated
@@ -1538,9 +1737,31 @@ struct wpa_config {
 	/**
 	 * p2p_device_random_mac_addr - P2P Device MAC address policy default
 	 *
-	 * 0 = use permanent MAC address
+	 * 0 = use permanent MAC address (the one set by default by the device
+	 *     driver). Notice that, if the device driver is configured to
+	 *     always use random MAC addresses, this flag breaks reinvoking a
+	 *     persistent group, so flags 1 or 2 should be used instead with
+	 *     such drivers if persistent groups are used.
 	 * 1 = use random MAC address on creating the interface if there is no
-	 * persistent groups.
+	 *     persistent group. Besides, if a persistent group is created,
+	 *     p2p_device_persistent_mac_addr is set to the MAC address of the
+	 *     P2P Device interface, so that this address will be subsequently
+	 *     used to change the MAC address of the P2P Device interface. With
+	 *     no persistent group, the random MAC address is created by
+	 *     wpa_supplicant, changing the one set by the device driver.
+	 *     The device driver shall support SIOCGIFFLAGS/SIOCSIFFLAGS ioctl
+	 *     interface control operations.
+	 * 2 = this flag should be used when the device driver uses random MAC
+	 *     addresses by default when a P2P Device interface is created.
+	 *     If p2p_device_persistent_mac_addr is set, use this MAC address
+	 *     on creating the P2P Device interface. If not set, use the
+	 *     default method adopted by the device driver (e.g., random MAC
+	 *     address). Besides, if a persistent group is created,
+	 *     p2p_device_persistent_mac_addr is set to the MAC address of the
+	 *     P2P Device interface, so that this address will be subsequently
+	 *     used in place of the default address set by the device driver.
+	 *     (This option does not need support of SIOCGIFFLAGS/SIOCSIFFLAGS
+	 *     ioctl interface control operations and uses NL80211_ATTR_MAC).
 	 *
 	 * By default, permanent MAC address is used.
 	 */
@@ -1583,6 +1804,103 @@ struct wpa_config {
 	 * 1 = use Extended Key ID when possible
 	 */
 	int extended_key_id;
+
+	/**
+	 * wowlan_disconnect_on_deinit - Trigger disconnect on wpa_supplicant
+	 * interface deinit even if the driver has enabled WoWLAN.
+	 *
+	 * 0 = Do not disconnect
+	 * 1 = Trigger disconnection
+	 */
+	int wowlan_disconnect_on_deinit;
+
+	/**
+	 * rsn_overriding - RSN overriding (default behavior)
+	 */
+	enum wpas_rsn_overriding rsn_overriding;
+
+#ifdef CONFIG_PASN
+#ifdef CONFIG_TESTING_OPTIONS
+	/*
+	 * Normally, KDK should be derived if and only if both sides support
+	 * secure LTF. Allow forcing KDK derivation for testing purposes.
+	 */
+	int force_kdk_derivation;
+
+	/* If set, corrupt the MIC in the 3rd Authentication frame of PASN */
+	int pasn_corrupt_mic;
+
+#endif /* CONFIG_TESTING_OPTIONS */
+#endif /* CONFIG_PASN*/
+
+#ifdef CONFIG_TESTING_OPTIONS
+	enum {
+		MLD_CONNECT_BAND_PREF_AUTO = 0,
+		MLD_CONNECT_BAND_PREF_2GHZ = 1,
+		MLD_CONNECT_BAND_PREF_5GHZ = 2,
+		MLD_CONNECT_BAND_PREF_6GHZ = 3,
+		MLD_CONNECT_BAND_PREF_MAX = 4,
+	}  mld_connect_band_pref;
+
+	u8 mld_connect_bssid_pref[ETH_ALEN];
+
+	int mld_force_single_link;
+#endif /* CONFIG_TESTING_OPTIONS */
+
+	/* Cipher version type */
+	int dik_cipher;
+
+	/* DevIK */
+	struct wpabuf *dik;
+
+	/**
+	 * identity - P2P2 peer device identities
+	 *
+	 * This is the head for the list of all the paired devices.
+	 */
+	struct wpa_dev_ik *identity;
+
+	/**
+	 * twt_requester - Whether TWT Requester Support is enabled
+	 *
+	 * This is for setting the bit 77 of the Extended Capabilities element.
+	 */
+	bool twt_requester;
+
+	/**
+	 * wfa_gen_capa: Whether to indicate Wi-Fi generational capability to
+	 *	the AP
+	 *
+	 * 0 = do not indicate (default)
+	 * 1 = indicate in protected Action frame
+	 * 2 = indicate in unprotected (Re)Association Request frame
+	 */
+	enum {
+		WFA_GEN_CAPA_DISABLED = 0,
+		WFA_GEN_CAPA_PROTECTED = 1,
+		WFA_GEN_CAPA_UNPROTECTED = 2,
+	} wfa_gen_capa;
+
+	/**
+	 * wfa_gen_capa_supp: Supported Generations (hexdump of a bit field)
+	 *
+	 * A bit field of supported Wi-Fi generations. This is encoded as an
+	 * little endian octt string.
+	 * bit 0: Wi-Fi 4
+	 * bit 1: Wi-Fi 5
+	 * bit 2: Wi-Fi 6
+	 * bit 3: Wi-Fi 7
+	 */
+	struct wpabuf *wfa_gen_capa_supp;
+
+	/**
+	 * wfa_gen_capa_cert: Certified Generations (hexdump of a bit field)
+	 *
+	 * This has the same format as wfa_gen_capa_supp. This is an optional
+	 * field, but if included, shall have the same length as
+	 * wfa_gen_capa_supp.
+	 */
+	struct wpabuf *wfa_gen_capa_cert;
 };
 
 
@@ -1594,6 +1912,8 @@ void wpa_config_foreach_network(struct wpa_config *config,
 				void (*func)(void *, struct wpa_ssid *),
 				void *arg);
 struct wpa_ssid * wpa_config_get_network(struct wpa_config *config, int id);
+struct wpa_ssid * wpa_config_get_network_with_dik_id(struct wpa_config *config,
+						     int dik_id);
 struct wpa_ssid * wpa_config_add_network(struct wpa_config *config);
 int wpa_config_remove_network(struct wpa_config *config, int id);
 void wpa_config_set_network_defaults(struct wpa_ssid *ssid);
@@ -1629,6 +1949,12 @@ int wpa_config_set_cred(struct wpa_cred *cred, const char *var,
 			const char *value, int line);
 char * wpa_config_get_cred_no_key(struct wpa_cred *cred, const char *var);
 
+int wpa_config_set_identity(struct wpa_dev_ik *identity, const char *var,
+			    const char *value, int line);
+void wpa_config_free_identity(struct wpa_dev_ik *identity);
+struct wpa_dev_ik * wpa_config_add_identity(struct wpa_config *config);
+int wpa_config_remove_identity(struct wpa_config *config, int id);
+
 struct wpa_config * wpa_config_alloc_empty(const char *ctrl_interface,
 					   const char *driver_param);
 #ifndef CONFIG_NO_STDOUT_DEBUG
@@ -1652,6 +1978,7 @@ const char * wpa_config_get_global_field_name(unsigned int i, int *no_var);
  * @name: Name of the configuration (e.g., path and file name for the
  * configuration file)
  * @cfgp: Pointer to previously allocated configuration data or %NULL if none
+ * @ro: Whether to mark networks from this configuration as read-only
  * Returns: Pointer to allocated configuration data or %NULL on failure
  *
  * This function reads configuration data, parses its contents, and allocates
@@ -1660,7 +1987,8 @@ const char * wpa_config_get_global_field_name(unsigned int i, int *no_var);
  *
  * Each configuration backend needs to implement this function.
  */
-struct wpa_config * wpa_config_read(const char *name, struct wpa_config *cfgp);
+struct wpa_config * wpa_config_read(const char *name, struct wpa_config *cfgp,
+				    bool ro);
 
 /**
  * wpa_config_write - Write or update configuration data

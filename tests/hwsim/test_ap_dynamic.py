@@ -37,6 +37,55 @@ def test_ap_change_ssid(dev, apdev):
     dev[0].set_network_quoted(id, "ssid", "test-wpa2-psk-new")
     dev[0].connect_network(id)
 
+def test_ap_change_ssid_wps(dev, apdev):
+    """Dynamic SSID change with hostapd and WPA2-PSK using WPS"""
+    params = hostapd.wpa2_params(ssid="test-wpa2-psk-start",
+                                 passphrase="12345678")
+    # Use a PSK and not the passphrase, because the PSK will have to be computed
+    # again if we use a passphrase.
+    del params["wpa_passphrase"]
+    params["wpa_psk"] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+    params.update({"wps_state": "2", "eap_server": "1"})
+    bssid = apdev[0]['bssid']
+    hapd = hostapd.add_ap(apdev[0], params)
+
+    new_ssid = "test-wpa2-psk-new"
+    logger.info("Change SSID dynamically (WPS)")
+    res = hapd.request("SET ssid " + new_ssid)
+    if "OK" not in res:
+        raise Exception("SET command failed")
+    res = hapd.request("RELOAD")
+    if "OK" not in res:
+        raise Exception("RELOAD command failed")
+
+    # Connect to the new ssid using wps:
+    hapd.request("WPS_PBC")
+    if "PBC Status: Active" not in hapd.request("WPS_GET_STATUS"):
+        raise Exception("PBC status not shown correctly")
+
+    dev[0].scan_for_bss(apdev[0]['bssid'], freq="2412", force_scan=True)
+    dev[0].request("WPS_PBC")
+    dev[0].wait_connected(timeout=20)
+    status = dev[0].get_status()
+    if status['wpa_state'] != 'COMPLETED' or status['bssid'] != bssid:
+        raise Exception("Not fully connected")
+    if status['ssid'] != new_ssid:
+        raise Exception("Unexpected SSID %s != %s" % (status['ssid'], new_ssid))
+    dev[0].request("DISCONNECT")
+    dev[0].wait_disconnected()
+
+def test_ap_reload_invalid(dev, apdev):
+    """hostapd RELOAD with invalid configuration"""
+    params = hostapd.wpa2_params(ssid="test-wpa2-psk-start",
+                                 passphrase="12345678")
+    hapd = hostapd.add_ap(apdev[0], params)
+    # Enable IEEE 802.11d without specifying country code
+    hapd.set("ieee80211d", "1")
+    if "FAIL" not in hapd.request("RELOAD"):
+        raise Exception("RELOAD command succeeded")
+    dev[0].connect("test-wpa2-psk-start", psk="12345678", scan_freq="2412")
+
 def multi_check(apdev, dev, check, scan_opt=True):
     id = []
     num_bss = len(check)
@@ -535,3 +584,26 @@ def test_ap_bss_config_file(dev, apdev, params):
             break
     if os.path.exists(pidfile):
         raise Exception("PID file exits after process termination")
+
+def test_ap_reload_bss_only(dev, apdev, params):
+    """Dynamic SSID change on only one BSS using RELOAD_BSS"""
+    ifname1 = apdev[0]['ifname']
+    ifname2 = apdev[0]['ifname'] + '-2'
+    hapd1 = hostapd.add_bss(apdev[0], ifname1, 'bss-1.conf')
+    hapd2 = hostapd.add_bss(apdev[0], ifname2, 'bss-2.conf')
+    id = dev[0].connect("bss-1", key_mgmt="NONE", scan_freq="2412")
+    dev[1].connect("bss-2", key_mgmt="NONE", scan_freq="2412")
+
+    res = hapd1.request("SET ssid test-new-ssid")
+    if "OK" not in res:
+        raise Exception("SET command failed")
+    res = hapd1.request("RELOAD_BSS")
+    if "OK" not in res:
+        raise Exception("RELOAD_BSS command failed")
+
+    ev = dev[1].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=1)
+    if ev is not None:
+        raise Exception("Unexpected disconnection when RELOAD_BSS was sent on another BSS.")
+
+    dev[0].set_network_quoted(id, "ssid", "test-new-ssid")
+    dev[0].connect_network(id)

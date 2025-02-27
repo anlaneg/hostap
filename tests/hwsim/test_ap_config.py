@@ -136,7 +136,8 @@ def test_ap_config_reload_file_while_disabled(dev, apdev, params):
     hapd.enable()
     dev[0].connect("foobar", key_mgmt="NONE", scan_freq="2412")
 
-def write_hostapd_config(conffile, ifname, ssid, ht=True, bss2=False):
+def write_hostapd_config(conffile, ifname, ssid, ht=True, bss2=False,
+                         iface_params=None, bss_params=None):
     with open(conffile, "w") as f:
         f.write("driver=nl80211\n")
         f.write("hw_mode=g\n")
@@ -145,13 +146,30 @@ def write_hostapd_config(conffile, ifname, ssid, ht=True, bss2=False):
             f.write("ieee80211n=1\n")
         f.write("interface=" + ifname + "\n")
         f.write("ssid=" + ssid + "\n")
+        if iface_params:
+            for l in iface_params:
+                f.write(l + "\n")
         if bss2:
             f.write("bss=" + ifname + "_2\n")
             f.write("ssid=" + ssid + "-2\n")
+        if bss_params:
+            for l in bss_params:
+                f.write(l + "\n")
 
 def test_ap_config_reload_on_sighup(dev, apdev, params):
     """hostapd configuration reload modification from file on SIGHUP"""
     run_ap_config_reload_on_sighup(dev, apdev, params)
+
+def term_hostapd_pid(pid, pidfile):
+    os.kill(pid, signal.SIGTERM)
+    removed = False
+    for i in range(20):
+        time.sleep(0.1)
+        if not os.path.exists(pidfile):
+            removed = True
+            break
+    if not removed:
+        raise Exception("hostapd PID file not removed on SIGTERM")
 
 def test_ap_config_reload_on_sighup_no_ht(dev, apdev, params):
     """hostapd configuration reload modification from file on SIGHUP (no HT)"""
@@ -190,15 +208,7 @@ def run_ap_config_reload_on_sighup(dev, apdev, params, ht=True):
     dev[0].request("REMOVE_NETWORK all")
     dev[0].wait_disconnected()
 
-    os.kill(pid, signal.SIGTERM)
-    removed = False
-    for i in range(20):
-        time.sleep(0.1)
-        if not os.path.exists(pidfile):
-            removed = True
-            break
-    if not removed:
-        raise Exception("hostapd PID file not removed on SIGTERM")
+    term_hostapd_pid(pid, pidfile)
 
     if ht and "dd180050f202" not in bss['ie']:
             raise Exception("Missing WMM IE after reload")
@@ -261,7 +271,44 @@ def test_ap_config_reload_on_sighup_bss_changes(dev, apdev, params):
     dev[0].dump_monitor()
     dev[1].dump_monitor()
 
-    os.kill(pid, signal.SIGTERM)
+    term_hostapd_pid(pid, pidfile)
+
+def test_ap_config_reload_on_sighup_config_id(dev, apdev, params):
+    """hostapd configuration reload when a config_id is provided"""
+    pidfile = params['prefix'] + ".hostapd.pid"
+    logfile = params['prefix'] + ".hostapd.log"
+    conffile = os.path.abspath(params['prefix'] + ".hostapd.conf")
+    prg = os.path.join(params['logdir'], 'alt-hostapd/hostapd/hostapd')
+    if not os.path.exists(prg):
+        prg = '../../hostapd/hostapd'
+    write_hostapd_config(conffile, apdev[0]['ifname'], "test", bss2=False,
+                         iface_params=["config_id=if1"],
+                         bss_params=[f"bss={apdev[0]['ifname']}_2",
+                                     "ssid=test-2", "config_id=bss2"])
+    cmd = [prg, '-B', '-dddt', '-P', pidfile, '-f', logfile, conffile]
+    res = subprocess.check_call(cmd)
+    if res != 0:
+        raise Exception("Could not start hostapd: %s" % str(res))
+    dev[0].connect("test-2", key_mgmt="NONE", scan_freq="2412")
+
+    write_hostapd_config(conffile, apdev[0]['ifname'], "test-a", bss2=False,
+                         iface_params=["config_id=if1-new"],
+                         bss_params=[f"bss={apdev[0]['ifname']}_2",
+                                     "ssid=test-2", "config_id=bss2"])
+
+    with open(pidfile, "r") as f:
+        pid = int(f.read())
+    os.kill(pid, signal.SIGHUP)
+    ev = dev[0].wait_event(["CTRL-EVENT-DISCONNECTED"], timeout=1)
+    if ev is not None:
+        raise Exception("Unexpected disconnection when config_id was not changed")
+
+    dev[0].request("REMOVE_NETWORK all")
+    dev[0].wait_disconnected()
+    dev[0].dump_monitor()
+    dev[0].connect("test-a", key_mgmt="NONE", scan_freq="2412")
+
+    term_hostapd_pid(pid, pidfile)
 
 def test_ap_config_reload_before_enable(dev, apdev, params):
     """hostapd configuration reload before enable"""
@@ -443,15 +490,9 @@ def test_ap_config_set_oom(dev, apdev):
              (1, "parse_anqp_elem", "SET anqp_elem 265:0000"),
              (2, "parse_anqp_elem", "SET anqp_elem 266:000000"),
              (1, "parse_venue_url", "SET venue_url 1:http://example.com/"),
-             (1, "hs20_parse_operator_icon", "SET operator_icon icon"),
-             (2, "hs20_parse_operator_icon", "SET operator_icon icon"),
              (1, "hs20_parse_conn_capab", "SET hs20_conn_capab 1:0:2"),
              (1, "hs20_parse_wan_metrics",
               "SET hs20_wan_metrics 01:8000:1000:80:240:3000"),
-             (1, "hs20_parse_icon",
-              "SET hs20_icon 32:32:eng:image/png:icon32:/tmp/icon32.png"),
-             (1, "hs20_parse_osu_server_uri",
-              "SET osu_server_uri https://example.com/osu/"),
              (1, "hostapd_config_parse_acs_chan_bias",
               "SET acs_chan_bias 1:0.8 6:0.8 11:0.8"),
              (2, "hostapd_config_parse_acs_chan_bias",
@@ -489,12 +530,10 @@ def test_ap_config_set_oom(dev, apdev):
             if "FAIL" not in hapd.request(cmd):
                 raise Exception("Command accepted during OOM: " + cmd)
 
-    hapd.set("hs20_icon", "32:32:eng:image/png:icon32:/tmp/icon32.png")
     hapd.set("hs20_conn_capab", "1:0:2")
     hapd.set("nai_realm", "0,example.com;example.net")
     hapd.set("venue_name", "eng:Example venue")
     hapd.set("roaming_consortium", "021122")
-    hapd.set("osu_server_uri", "https://example.com/osu/")
     hapd.set("vendor_elements", "01020304")
     hapd.set("vendor_elements", "01020304")
     hapd.set("vendor_elements", "")
@@ -503,19 +542,9 @@ def test_ap_config_set_oom(dev, apdev):
     hapd.set("lci", "")
     hapd.set("civic", "")
 
-    tests = [(1, "hs20_parse_icon",
-              "SET hs20_icon 32:32:eng:image/png:icon32:/tmp/icon32.png"),
-             (1, "parse_roaming_consortium", "SET roaming_consortium 021122"),
+    tests = [(1, "parse_roaming_consortium", "SET roaming_consortium 021122"),
              (2, "parse_nai_realm", "SET nai_realm 0,example.com;example.net"),
              (1, "parse_lang_string", "SET venue_name eng:Example venue"),
-             (1, "hs20_parse_osu_server_uri",
-              "SET osu_server_uri https://example.com/osu/"),
-             (1, "hs20_parse_osu_nai", "SET osu_nai anonymous@example.com"),
-             (1, "hs20_parse_osu_nai2", "SET osu_nai2 anonymous@example.com"),
-             (1, "hostapd_parse_intlist", "SET osu_method_list 1 0"),
-             (1, "hs20_parse_osu_icon", "SET osu_icon icon32"),
-             (2, "hs20_parse_osu_icon", "SET osu_icon icon32"),
-             (2, "hs20_parse_osu_icon", "SET osu_icon icon32"),
              (1, "hs20_parse_conn_capab", "SET hs20_conn_capab 1:0:2")]
     for count, func, cmd in tests:
         with alloc_fail(hapd, count, func):

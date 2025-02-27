@@ -214,17 +214,6 @@ def test_hapd_ctrl_unknown(dev, apdev):
         raise Exception("Unexpected response")
 
 @remote_compatible
-def test_hapd_ctrl_hs20_wnm_notif(dev, apdev):
-    """hostapd and HS20_WNM_NOTIF ctrl_iface command"""
-    ssid = "hapd-ctrl"
-    params = {"ssid": ssid}
-    hapd = hostapd.add_ap(apdev[0], params)
-    if "FAIL" not in hapd.request("HS20_WNM_NOTIF 00:11:22:33:44 http://example.com/"):
-        raise Exception("Unexpected HS20_WNM_NOTIF success")
-    if "FAIL" not in hapd.request("HS20_WNM_NOTIF 00:11:22:33:44:55http://example.com/"):
-        raise Exception("Unexpected HS20_WNM_NOTIF success")
-
-@remote_compatible
 def test_hapd_ctrl_hs20_deauth_req(dev, apdev):
     """hostapd and HS20_DEAUTH_REQ ctrl_iface command"""
     ssid = "hapd-ctrl"
@@ -403,16 +392,6 @@ def test_hapd_ctrl_set_error_cases(dev, apdev):
               "hs20_icon 32:32:eng:image/png:icon32",
               "hs20_icon 32:32:eng:image/png:123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890:/tmp/icon32.png",
               "hs20_icon 32:32:eng:image/png:name:/tmp/123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890.png",
-              "osu_ssid ",
-              "osu_ssid P",
-              'osu_ssid P"abc',
-              'osu_ssid "1234567890123456789012345678901234567890"',
-              "osu_friendly_name eng:Example",
-              "osu_nai anonymous@example.com",
-              "osu_nai2 anonymous@example.com",
-              "osu_method_list 1 0",
-              "osu_icon foo",
-              "osu_service_desc eng:Example services",
               "ssid 1234567890123456789012345678901234567890",
               "pac_opaque_encr_key 123456",
               "eap_fast_a_id 12345",
@@ -507,17 +486,6 @@ def test_hapd_ctrl_set_error_cases(dev, apdev):
               "tx_queue_data3_cwmax 4",
               "tx_queue_data3_aifs -4",
               "tx_queue_data3_foo 1"]
-    for e in errors:
-        if "FAIL" not in hapd.request("SET " + e):
-            raise Exception("Unexpected SET success: '%s'" % e)
-
-    if "OK" not in hapd.request("SET osu_server_uri https://example.com/"):
-        raise Exception("Unexpected SET osu_server_uri failure")
-    if "OK" not in hapd.request("SET osu_friendly_name eng:Example"):
-        raise Exception("Unexpected SET osu_friendly_name failure")
-
-    errors = ["osu_friendly_name eng1:Example",
-              "osu_service_desc eng1:Example services"]
     for e in errors:
         if "FAIL" not in hapd.request("SET " + e):
             raise Exception("Unexpected SET success: '%s'" % e)
@@ -856,6 +824,7 @@ def test_hapd_ctrl_ext_io_errors(dev, apdev):
     tests = ["MGMT_TX 1",
              "MGMT_TX 1q",
              "MGMT_RX_PROCESS freq=2412",
+             "MGMT_TX_STATUS_PROCESS style=1 ok=0 buf=12345678",
              "EAPOL_RX foo",
              "EAPOL_RX 00:11:22:33:44:55 1",
              "EAPOL_RX 00:11:22:33:44:55 1q"]
@@ -873,7 +842,10 @@ def test_hapd_ctrl_ext_io_errors(dev, apdev):
     tests = ["MGMT_RX_PROCESS freq=2412",
              "MGMT_RX_PROCESS freq=2412 ssi_signal=0",
              "MGMT_RX_PROCESS freq=2412 frame=1",
-             "MGMT_RX_PROCESS freq=2412 frame=1q"]
+             "MGMT_RX_PROCESS freq=2412 frame=1q",
+             "MGMT_TX_STATUS_PROCESS style=1 ok=0",
+             "MGMT_TX_STATUS_PROCESS style=1 ok=0 buf=1234567",
+             "MGMT_TX_STATUS_PROCESS style=1 ok=0 buf=1234567q"]
     for t in tests:
         if "FAIL" not in hapd.request(t):
             raise Exception("Invalid command accepted: " + t)
@@ -906,6 +878,36 @@ def test_hapd_ctrl_ext_io_errors(dev, apdev):
     with alloc_fail(hapd, 1, "=hostapd_ctrl_iface_data_test_frame"):
         if "FAIL" not in hapd.request("DATA_TEST_FRAME 112233445566778899aabbccddeeff"):
             raise Exception("DATA_TEST_FRAME accepted during OOM")
+
+def test_hapd_ctrl_vendor_test(dev, apdev):
+    """hostapd and VENDOR test command"""
+    ssid = "hapd-ctrl"
+    params = {"ssid": ssid}
+    hapd = hostapd.add_ap(apdev[0], params)
+
+    OUI_QCA = 0x001374
+    QCA_NL80211_VENDOR_SUBCMD_TEST = 1
+    QCA_WLAN_VENDOR_ATTR_TEST = 8
+    attr = struct.pack("@HHI", 4 + 4, QCA_WLAN_VENDOR_ATTR_TEST, 123)
+    cmd = "VENDOR %x %d %s" % (OUI_QCA, QCA_NL80211_VENDOR_SUBCMD_TEST, binascii.hexlify(attr).decode())
+
+    res = hapd.request(cmd)
+    if "FAIL" in res:
+        raise Exception("VENDOR command failed")
+    val, = struct.unpack("@I", binascii.unhexlify(res))
+    if val != 125:
+        raise Exception("Incorrect response value")
+
+    res = hapd.request(cmd + " nested=1")
+    if "FAIL" in res:
+        raise Exception("VENDOR command failed")
+    val, = struct.unpack("@I", binascii.unhexlify(res))
+    if val != 125:
+        raise Exception("Incorrect response value")
+
+    res = hapd.request(cmd + " nested=0")
+    if "FAIL" not in res:
+        raise Exception("VENDOR command with invalid (not nested) data accepted")
 
 def test_hapd_ctrl_vendor_errors(dev, apdev):
     """hostapd and VENDOR errors"""
@@ -968,6 +970,12 @@ def test_hapd_ctrl_update_beacon(dev, apdev):
         if "FAIL" not in hapd.request("UPDATE_BEACON"):
             raise Exception("UPDATE_BEACON succeeded unexpectedly")
     dev[0].connect(ssid, key_mgmt="NONE", scan_freq="2412")
+    dev[0].request("DISCONNECT")
+    if "OK" not in hapd.request("UPDATE_BEACON"):
+        raise Exception("UPDATE_BEACON failed")
+    hapd.disable()
+    if "FAIL" not in hapd.request("UPDATE_BEACON"):
+        raise Exception("UPDATE_BEACON did not indicate failure when disabled")
 
 def test_hapd_ctrl_test_fail(dev, apdev):
     """hostapd and TEST_ALLOC_FAIL/TEST_FAIL"""
@@ -980,3 +988,58 @@ def test_hapd_ctrl_test_fail(dev, apdev):
         raise Exception("TEST_ALLOC_FAIL clearing failed")
     if "OK" not in hapd.request("TEST_FAIL "):
         raise Exception("TEST_FAIL clearing failed")
+
+def test_hapd_ctrl_setband(dev, apdev):
+    """hostapd and setband"""
+    ssid = "hapd-ctrl"
+    params = {"ssid": ssid}
+    hapd = hostapd.add_ap(apdev[0], params)
+    # The actual setband driver operations are not supported without vendor
+    # commands, so only check minimal parsing items here.
+    if "FAIL" not in hapd.request("SET setband foo"):
+        raise Exception("Invalid setband value accepted")
+    vals = ["5G", "6G", "2G", "2G,6G", "2G,5G,6G", "AUTO"]
+    for val in vals:
+        if "OK" not in hapd.request("SET setband " + val):
+            raise Exception("SET setband %s failed" % val)
+
+def test_hapd_ctrl_get_capability(dev, apdev):
+    """hostapd GET_CAPABILITY"""
+    ssid = "hapd-ctrl"
+    params = {"ssid": ssid}
+    hapd = hostapd.add_ap(apdev[0], params)
+    if "FAIL" not in hapd.request("GET_CAPABILITY "):
+        raise Exception("Invalid GET_CAPABILITY accepted")
+    res = hapd.request("GET_CAPABILITY dpp")
+    logger.info("DPP capability: " + res)
+
+def test_hapd_ctrl_pmksa_add_failures(dev, apdev):
+    """hostapd PMKSA_ADD failures"""
+    ssid = "hapd-ctrl"
+    params = {"ssid": ssid}
+    hapd = hostapd.add_ap(apdev[0], params)
+    tests = ["q",
+             "22:22:22:22:22:22",
+             "22:22:22:22:22:22 q",
+             "22:22:22:22:22:22 " + 16*'00',
+             "22:22:22:22:22:22 " + 16*"00" + " " + 10*"00",
+             "22:22:22:22:22:22 " + 16*"00" + " q",
+             "22:22:22:22:22:22 " + 16*"00" + " " + 200*"00",
+             "22:22:22:22:22:22 " + 16*"00" + " " + 32*"00" + " 12345",
+             "22:22:22:22:22:22 " + 16*"00" + " " + 32*"00" + " 12345 1",
+             ""]
+    for t in tests:
+        if "FAIL" not in hapd.request("PMKSA_ADD " + t):
+            raise Exception("Invalid PMKSA_ADD accepted: " + t)
+
+def test_hapd_ctrl_attach_errors(dev, apdev):
+    """hostapd ATTACH errors"""
+    params = {"ssid": "hapd-ctrl"}
+    hapd = hostapd.add_ap(apdev[0], params)
+    hglobal = hostapd.HostapdGlobal(apdev[0])
+    with alloc_fail(hapd, 1, "ctrl_iface_attach"):
+        if "FAIL" not in hapd.request("ATTACH foo"):
+            raise Exception("Invalid ATTACH accepted")
+    with alloc_fail(hapd, 1, "ctrl_iface_attach"):
+        if "FAIL" not in hglobal.request("ATTACH foo"):
+            raise Exception("Invalid ATTACH accepted")

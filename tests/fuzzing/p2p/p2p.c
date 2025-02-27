@@ -12,7 +12,18 @@
 #include "utils/eloop.h"
 #include "common/ieee802_11_defs.h"
 #include "p2p/p2p.h"
+#include "ap/hostapd.h"
+#include "ap/ieee802_1x.h"
+#include "ap/pmksa_cache_auth.h"
 #include "../fuzzer-common.h"
+
+
+int pasn_responder_pmksa_cache_get(struct rsn_pmksa_cache *pmksa,
+				   const u8 *bssid, u8 *pmkid, u8 *pmk,
+				   size_t *pmk_len)
+{
+	return -1;
+}
 
 
 static void debug_print(void *ctx, int level, const char *msg)
@@ -115,7 +126,7 @@ static void test_send(void *eloop_data, void *user_ctx)
 	os_memset(&rx_time, 0, sizeof(rx_time));
 	p2p_scan_res_handler(ctx->p2p, (u8 *) "\x02\x00\x00\x00\x01\x00", 2412,
 			     &rx_time, 0, ctx->data, ctx->data_len);
-	p2p_scan_res_handled(ctx->p2p);
+	p2p_scan_res_handled(ctx->p2p, 0);
 
 	p2p_probe_req_rx(ctx->p2p, (u8 *) "\x02\x00\x00\x00\x01\x00",
 			 (u8 *) "\x02\x00\x00\x00\x00\x00",

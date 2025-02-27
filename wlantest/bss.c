@@ -21,7 +21,23 @@ struct wlantest_bss * bss_find(struct wlantest *wt, const u8 *bssid)
 	struct wlantest_bss *bss;
 
 	dl_list_for_each(bss, &wt->bss, struct wlantest_bss, list) {
-		if (os_memcmp(bss->bssid, bssid, ETH_ALEN) == 0)
+		if (ether_addr_equal(bss->bssid, bssid))
+			return bss;
+	}
+
+	return NULL;
+}
+
+
+struct wlantest_bss * bss_find_mld(struct wlantest *wt, const u8 *mld_mac_addr,
+				   int link_id)
+{
+	struct wlantest_bss *bss;
+
+	dl_list_for_each(bss, &wt->bss, struct wlantest_bss, list) {
+		if (ether_addr_equal(bss->mld_mac_addr, mld_mac_addr) &&
+		    (link_id < 0 ||
+		     (bss->link_id_set && bss->link_id == link_id)))
 			return bss;
 	}
 
@@ -102,6 +118,7 @@ int bss_add_pmk_from_passphrase(struct wlantest_bss *bss,
 		   " based on passphrase '%s'",
 		   MAC2STR(bss->bssid), passphrase);
 	wpa_hexdump(MSG_DEBUG, "Possible PMK", pmk->pmk, PMK_LEN);
+	pmk->pmk_len = PMK_LEN;
 	dl_list_add(&bss->pmk, &pmk->list);
 
 	return 0;
@@ -115,7 +132,7 @@ static void bss_add_pmk(struct wlantest *wt, struct wlantest_bss *bss)
 	dl_list_for_each(p, &wt->passphrase, struct wlantest_passphrase, list)
 	{
 		if (!is_zero_ether_addr(p->bssid) &&
-		    os_memcmp(p->bssid, bss->bssid, ETH_ALEN) != 0)
+		    !ether_addr_equal(p->bssid, bss->bssid))
 			continue;
 		if (p->ssid_len &&
 		    (p->ssid_len != bss->ssid_len ||
@@ -157,35 +174,18 @@ void bss_update(struct wlantest *wt, struct wlantest_bss *bss,
 		bss_add_pmk(wt, bss);
 	}
 
-	if (elems->osen == NULL) {
-		if (bss->osenie[0]) {
-			add_note(wt, MSG_INFO, "BSS " MACSTR
-				 " - OSEN IE removed", MAC2STR(bss->bssid));
-			bss->rsnie[0] = 0;
-			update = 1;
-		}
-	} else {
-		if (bss->osenie[0] == 0 ||
-		    os_memcmp(bss->osenie, elems->osen - 2,
-			      elems->osen_len + 2) != 0) {
-			wpa_printf(MSG_INFO, "BSS " MACSTR " - OSEN IE "
-				   "stored", MAC2STR(bss->bssid));
-			wpa_hexdump(MSG_DEBUG, "OSEN IE", elems->osen - 2,
-				    elems->osen_len + 2);
-			update = 1;
-		}
-		os_memcpy(bss->osenie, elems->osen - 2,
-			  elems->osen_len + 2);
-	}
-
-	if (elems->rsn_ie == NULL) {
+	/* S1G does not include RSNE in beacon, so only clear it from
+	 * Probe Response frames. Note this assumes short beacons were dropped
+	 * due to missing SSID above.
+	 */
+	if (!elems->rsn_ie && (!elems->s1g_capab || beacon != 1)) {
 		if (bss->rsnie[0]) {
 			add_note(wt, MSG_INFO, "BSS " MACSTR
 				 " - RSN IE removed", MAC2STR(bss->bssid));
 			bss->rsnie[0] = 0;
 			update = 1;
 		}
-	} else {
+	} else if (elems->rsn_ie) {
 		if (bss->rsnie[0] == 0 ||
 		    os_memcmp(bss->rsnie, elems->rsn_ie - 2,
 			      elems->rsn_ie_len + 2) != 0) {
@@ -222,6 +222,31 @@ void bss_update(struct wlantest *wt, struct wlantest_bss *bss,
 
 	if (elems->mdie)
 		os_memcpy(bss->mdid, elems->mdie, 2);
+
+	bss->mesh = elems->mesh_id != NULL;
+
+	if (is_zero_ether_addr(bss->mld_mac_addr) &&
+	    elems->basic_mle && elems->basic_mle_len >= 2 + 1 + ETH_ALEN &&
+	    elems->basic_mle[2] >= 1 + ETH_ALEN) {
+		os_memcpy(bss->mld_mac_addr, &elems->basic_mle[2 + 1],
+			  ETH_ALEN);
+		wpa_printf(MSG_DEBUG,
+			   "Learned AP MLD MAC Address from Beacon/Probe Response frame: "
+			   MACSTR " (BSSID " MACSTR ")",
+			   MAC2STR(bss->mld_mac_addr), MAC2STR(bss->bssid));
+	}
+
+	if (!bss->link_id_set &&
+	    elems->basic_mle && elems->basic_mle_len >= 2 + 1 + ETH_ALEN + 1 &&
+	    elems->basic_mle[2] >= 1 + ETH_ALEN + 1 &&
+	    (WPA_GET_LE16(elems->basic_mle) &
+	     BASIC_MULTI_LINK_CTRL_PRES_LINK_ID)) {
+		    bss->link_id = elems->basic_mle[2 + 1 + ETH_ALEN] & 0x0f;
+		    wpa_printf(MSG_DEBUG,
+			       "Learned AP MLD Link ID %u for this affiliated link",
+			       bss->link_id);
+		    bss->link_id_set = true;
+	}
 
 	if (!update)
 		return;
@@ -269,33 +294,25 @@ void bss_update(struct wlantest *wt, struct wlantest_bss *bss,
 		}
 	}
 
-	if (bss->osenie[0]) {
-		bss->proto |= WPA_PROTO_OSEN;
-		bss->pairwise_cipher |= WPA_CIPHER_CCMP;
-		bss->group_cipher |= WPA_CIPHER_CCMP;
-		bss->key_mgmt |= WPA_KEY_MGMT_OSEN;
-	}
-
 	if (!(bss->proto & WPA_PROTO_RSN) ||
 	    !(bss->rsn_capab & WPA_CAPABILITY_MFPC))
 		bss->mgmt_group_cipher = 0;
 
-	if (!bss->wpaie[0] && !bss->rsnie[0] && !bss->osenie[0] &&
+	if (!bss->wpaie[0] && !bss->rsnie[0] &&
 	    (bss->capab_info & WLAN_CAPABILITY_PRIVACY))
 		bss->group_cipher = WPA_CIPHER_WEP40;
 
 	wpa_printf(MSG_INFO, "BSS " MACSTR
-		   " proto=%s%s%s%s"
+		   " proto=%s%s%s"
 		   "pairwise=%s%s%s%s%s%s%s"
 		   "group=%s%s%s%s%s%s%s%s%s"
 		   "mgmt_group_cipher=%s%s%s%s%s"
-		   "key_mgmt=%s%s%s%s%s%s%s%s%s"
-		   "rsn_capab=%s%s%s%s%s%s%s",
+		   "key_mgmt=%s%s%s%s%s%s%s%s%s%s%s%s%s%s"
+		   "rsn_capab=%s%s%s%s%s%s%s%s%s%s",
 		   MAC2STR(bss->bssid),
 		   bss->proto == 0 ? "OPEN " : "",
 		   bss->proto & WPA_PROTO_WPA ? "WPA " : "",
 		   bss->proto & WPA_PROTO_RSN ? "WPA2 " : "",
-		   bss->proto & WPA_PROTO_OSEN ? "OSEN " : "",
 		   bss->pairwise_cipher == 0 ? "N/A " : "",
 		   bss->pairwise_cipher & WPA_CIPHER_NONE ? "NONE " : "",
 		   bss->pairwise_cipher & WPA_CIPHER_TKIP ? "TKIP " : "",
@@ -333,7 +350,15 @@ void bss_update(struct wlantest *wt, struct wlantest_bss *bss,
 		   "EAP-SHA256 " : "",
 		   bss->key_mgmt & WPA_KEY_MGMT_PSK_SHA256 ?
 		   "PSK-SHA256 " : "",
-		   bss->key_mgmt & WPA_KEY_MGMT_OSEN ? "OSEN " : "",
+		   bss->key_mgmt & WPA_KEY_MGMT_OWE ? "OWE " : "",
+		   bss->key_mgmt & WPA_KEY_MGMT_PASN ? "PASN " : "",
+		   bss->key_mgmt & WPA_KEY_MGMT_DPP ? "DPP " : "",
+		   bss->key_mgmt & WPA_KEY_MGMT_IEEE8021X_SUITE_B ?
+		   "EAP-SUITE-B " : "",
+		   bss->key_mgmt & WPA_KEY_MGMT_IEEE8021X_SUITE_B_192 ?
+		   "EAP-SUITE-B-192 " : "",
+		   bss->key_mgmt & WPA_KEY_MGMT_IEEE8021X_SHA384 ?
+		   "EAP-SHA384 " : "",
 		   bss->rsn_capab & WPA_CAPABILITY_PREAUTH ? "PREAUTH " : "",
 		   bss->rsn_capab & WPA_CAPABILITY_NO_PAIRWISE ?
 		   "NO_PAIRWISE " : "",
@@ -341,6 +366,11 @@ void bss_update(struct wlantest *wt, struct wlantest_bss *bss,
 		   bss->rsn_capab & WPA_CAPABILITY_MFPC ? "MFPC " : "",
 		   bss->rsn_capab & WPA_CAPABILITY_PEERKEY_ENABLED ?
 		   "PEERKEY " : "",
+		   bss->rsn_capab & WPA_CAPABILITY_SPP_A_MSDU_CAPABLE ?
+		   "SPP-A-MSDU-CAPAB " : "",
+		   bss->rsn_capab & WPA_CAPABILITY_SPP_A_MSDU_REQUIRED ?
+		   "SPP-A-MSDU-REQUIRED " : "",
+		   bss->rsn_capab & WPA_CAPABILITY_PBAC ? "PBAC " : "",
 		   bss->rsn_capab & WPA_CAPABILITY_OCVC ? "OCVC " : "",
 		   bss->rsn_capab & WPA_CAPABILITY_EXT_KEY_ID_FOR_UNICAST ?
 		   "ExtKeyID " : "");

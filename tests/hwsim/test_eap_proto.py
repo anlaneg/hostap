@@ -16,9 +16,8 @@ import threading
 import time
 
 import hostapd
-from utils import HwsimSkip, alloc_fail, fail_test, wait_fail_trigger
+from utils import *
 from test_ap_eap import check_eap_capa, check_hlr_auc_gw_support, int_eap_server_params
-from test_erp import check_erp_capa
 
 try:
     import OpenSSL
@@ -75,6 +74,32 @@ EAP_ERP_TLV_NAS_IDENTIFIER = 130
 EAP_ERP_TLV_NAS_IP_ADDRESS = 131
 EAP_ERP_TLV_NAS_IPV6_ADDRESS = 132
 
+def add_message_authenticator_attr(reply, digest):
+    if digest.startswith(b'0x'):
+        # Work around pyrad tools.py EncodeOctets() functionality that
+        # assumes a binary value that happens to start with "0x" to be
+        # a hex string.
+        digest = b"0x" + binascii.hexlify(digest)
+    reply.AddAttribute("Message-Authenticator", digest)
+
+def build_message_auth(pkt, reply, secret=None):
+    if secret is None:
+        secret = reply.secret
+    hmac_obj = hmac.new(secret, digestmod=hashlib.md5)
+    hmac_obj.update(struct.pack("B", reply.code))
+    hmac_obj.update(struct.pack("B", reply.id))
+
+    reply.AddAttribute("Message-Authenticator", 16*b'\x00')
+    attrs = reply._PktEncodeAttributes()
+
+    # Length
+    flen = 4 + 16 + len(attrs)
+    hmac_obj.update(struct.pack(">H", flen))
+    hmac_obj.update(pkt.authenticator)
+    hmac_obj.update(attrs)
+    del reply[80]
+    add_message_authenticator_attr(reply, hmac_obj.digest())
+
 def run_pyrad_server(srv, t_stop, eap_handler):
     srv.RunWithStop(t_stop, eap_handler)
 
@@ -106,21 +131,8 @@ def start_radius_server(eap_handler):
                 logger.info("No EAP request available")
             reply.code = pyrad.packet.AccessChallenge
 
-            hmac_obj = hmac.new(reply.secret, digestmod=hashlib.md5)
-            hmac_obj.update(struct.pack("B", reply.code))
-            hmac_obj.update(struct.pack("B", reply.id))
-
             # reply attributes
-            reply.AddAttribute("Message-Authenticator", 16*b'\x00')
-            attrs = reply._PktEncodeAttributes()
-
-            # Length
-            flen = 4 + 16 + len(attrs)
-            hmac_obj.update(struct.pack(">H", flen))
-            hmac_obj.update(pkt.authenticator)
-            hmac_obj.update(attrs)
-            del reply[80]
-            reply.AddAttribute("Message-Authenticator", hmac_obj.digest())
+            build_message_auth(pkt, reply)
 
             self.SendReplyPacket(pkt.fd, reply)
 
@@ -153,7 +165,7 @@ def start_radius_server(eap_handler):
     srv.hosts["127.0.0.1"] = pyrad.server.RemoteHost("127.0.0.1",
                                                      b"radius",
                                                      "localhost")
-    srv.BindToAddress("")
+    srv.BindToAddress("127.0.0.1")
     t_stop = threading.Event()
     t = threading.Thread(target=run_pyrad_server, args=(srv, t_stop, eap_handler))
     t.start()
@@ -764,6 +776,7 @@ def test_eap_proto_sake(dev, apdev):
                 raise Exception("Timeout on EAP start")
             time.sleep(0.1)
             dev[0].request("REMOVE_NETWORK all")
+            dev[0].dump_monitor()
 
         logger.info("Too short password")
         dev[0].connect("eap-test", key_mgmt="WPA-EAP", scan_freq="2412",
@@ -773,7 +786,20 @@ def test_eap_proto_sake(dev, apdev):
         ev = dev[0].wait_event(["CTRL-EVENT-EAP-PROPOSED-METHOD"], timeout=15)
         if ev is None:
             raise Exception("Timeout on EAP start")
+        start = os.times()[4]
+        while True:
+            ev = dev[0].wait_event(["CTRL-EVENT-EAP-PROPOSED-METHOD"],
+                                   timeout=0.1)
+            if ev is None:
+                break
+            now = os.times()[4]
+            if now - start > 0.1:
+                break
+            dev[0].dump_monitor()
+
+        dev[0].request("REMOVE_NETWORK all")
         time.sleep(0.1)
+        dev[0].dump_monitor()
     finally:
         stop_radius_server(srv)
 
@@ -803,7 +829,8 @@ def test_eap_proto_sake_errors(dev, apdev):
              (1, "eap_sake_compute_mic;eap_sake_process_challenge"),
              (1, "eap_sake_build_msg;eap_sake_process_confirm"),
              (1, "eap_sake_compute_mic;eap_sake_process_confirm"),
-             (2, "eap_sake_compute_mic;=eap_sake_process_confirm"),
+             (2, "eap_sake_compute_mic"),
+             (3, "eap_sake_compute_mic"),
              (1, "eap_sake_getKey"),
              (1, "eap_sake_get_emsk"),
              (1, "eap_sake_get_session_id")]
@@ -984,7 +1011,7 @@ def test_eap_proto_sake_server(dev, apdev):
     # Unknown session
     # --> EAP-SAKE: Session ID mismatch
     sess, = struct.unpack('B', binascii.unhexlify(resp[20:22]))
-    sess = binascii.hexlify(struct.pack('B', sess + 1)).decode()
+    sess = binascii.hexlify(struct.pack('B', (sess + 1) % 256)).decode()
     msg = resp[0:4] + "0008" + resp[8:12] + "0008" + "3002" + sess + "00"
     tx_msg(dev[0], hapd, msg)
     # Unknown subtype
@@ -1639,9 +1666,10 @@ def start_md5_assoc(dev, hapd):
     proxy_msg(dev, hapd) # NAK
     proxy_msg(hapd, dev) # MD5 Request
 
-def stop_md5_assoc(dev, hapd):
+def stop_md5_assoc(dev, hapd, wait=True):
     dev.request("REMOVE_NETWORK all")
-    dev.wait_disconnected()
+    if wait:
+        dev.wait_disconnected()
     dev.dump_monitor()
     hapd.dump_monitor()
 
@@ -1660,10 +1688,14 @@ def test_eap_proto_md5_server(dev, apdev):
     start_md5_assoc(dev[0], hapd)
     proxy_msg(dev[0], hapd) # MD5 Response
     proxy_msg(hapd, dev[0]) # EAP-Success
-    ev = dev[0].wait_event(["CTRL-EVENT-EAP-SUCCESS"], timeout=5)
+    # Accept both EAP-Success and disconnection indication since it is possible
+    # for disconnection from the AP (due to EAP-MD5 not deriving keys) to be
+    # processed more quickly.
+    ev = dev[0].wait_event(["CTRL-EVENT-EAP-SUCCESS",
+                            "CTRL-EVENT-DISCONNECTED"], timeout=5)
     if ev is None:
         raise Exception("No EAP-Success reported")
-    stop_md5_assoc(dev[0], hapd)
+    stop_md5_assoc(dev[0], hapd, wait="CTRL-EVENT-EAP-SUCCESS" in ev)
 
     start_md5_assoc(dev[0], hapd)
     resp = rx_msg(dev[0])
@@ -2866,14 +2898,14 @@ def test_eap_proto_eke_errors(dev, apdev):
     tests = [(1, "eap_eke_dh_init", None),
              (1, "eap_eke_prf_hmac_sha1", "dhgroup=3 encr=1 prf=1 mac=1"),
              (1, "eap_eke_prf_hmac_sha256", "dhgroup=5 encr=1 prf=2 mac=2"),
-             (1, "eap_eke_prf", None),
+             (1, "eap_eke_prf_*", None),
              (1, "os_get_random;eap_eke_dhcomp", None),
              (1, "aes_128_cbc_encrypt;eap_eke_dhcomp", None),
              (1, "aes_128_cbc_decrypt;eap_eke_shared_secret", None),
-             (1, "eap_eke_prf;eap_eke_shared_secret", None),
-             (1, "eap_eke_prfplus;eap_eke_derive_ke_ki", None),
-             (1, "eap_eke_prfplus;eap_eke_derive_ka", None),
-             (1, "eap_eke_prfplus;eap_eke_derive_msk", None),
+             (1, "hmac_sha256_vector;eap_eke_shared_secret", None),
+             (1, "eap_eke_prf_hmac_sha256;eap_eke_derive_ke_ki", None),
+             (1, "eap_eke_prf_hmac_sha256;eap_eke_derive_ka", None),
+             (1, "eap_eke_prf_hmac_sha256;eap_eke_derive_msk", None),
              (1, "os_get_random;eap_eke_prot", None),
              (1, "aes_128_cbc_decrypt;eap_eke_decrypt_prot", None),
              (1, "eap_eke_derive_key;eap_eke_process_commit", None),
@@ -5521,7 +5553,7 @@ def test_eap_proto_sim_errors(dev, apdev):
         dev[0].request("REMOVE_NETWORK all")
         dev[0].dump_monitor()
 
-    tests = [(1, "eap_sim_verify_mac;eap_sim_process_challenge"),
+    tests = [(1, "eap_sim_verify_mac"),
              (1, "eap_sim_parse_encr;eap_sim_process_challenge"),
              (1, "eap_sim_msg_init;eap_sim_response_start"),
              (1, "wpabuf_alloc;eap_sim_msg_init;eap_sim_response_start"),
@@ -5572,6 +5604,7 @@ def test_eap_proto_sim_errors(dev, apdev):
         dev[0].request("REMOVE_NETWORK all")
         dev[0].dump_monitor()
 
+    hapd2.dump_monitor()
     tests = ["eap_sim_msg_add_encr_start;eap_sim_response_notification",
              "aes_128_cbc_encrypt;eap_sim_response_notification"]
     for func in tests:
@@ -5581,6 +5614,7 @@ def test_eap_proto_sim_errors(dev, apdev):
                            eap="SIM", identity="1232010000000000",
                            phase1="result_ind=1",
                            password="90dca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581")
+            hapd2.wait_sta()
             dev[0].request("REAUTHENTICATE")
             ev = dev[0].wait_event(["CTRL-EVENT-EAP-METHOD"], timeout=5)
             if ev is None:
@@ -5589,7 +5623,9 @@ def test_eap_proto_sim_errors(dev, apdev):
             wait_fail_trigger(dev[0], "GET_FAIL")
             dev[0].request("REMOVE_NETWORK all")
             dev[0].dump_monitor()
+            hapd2.wait_sta_disconnect()
 
+    hapd2.dump_monitor()
     tests = ["eap_sim_parse_encr;eap_sim_process_notification_reauth"]
     for func in tests:
         with alloc_fail(dev[0], 1, func):
@@ -5598,6 +5634,7 @@ def test_eap_proto_sim_errors(dev, apdev):
                            eap="SIM", identity="1232010000000000",
                            phase1="result_ind=1",
                            password="90dca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581")
+            hapd2.wait_sta()
             dev[0].request("REAUTHENTICATE")
             ev = dev[0].wait_event(["CTRL-EVENT-EAP-METHOD"], timeout=5)
             if ev is None:
@@ -5606,6 +5643,7 @@ def test_eap_proto_sim_errors(dev, apdev):
             wait_fail_trigger(dev[0], "GET_ALLOC_FAIL")
             dev[0].request("REMOVE_NETWORK all")
             dev[0].dump_monitor()
+            hapd2.wait_sta_disconnect()
 
 def test_eap_proto_aka_errors(dev, apdev):
     """EAP-AKA protocol tests (error paths)"""
@@ -5629,8 +5667,7 @@ def test_eap_proto_aka_errors(dev, apdev):
     tests = [(1, "=eap_aka_learn_ids"),
              (2, "=eap_aka_learn_ids"),
              (1, "eap_sim_parse_encr;eap_aka_process_challenge"),
-             (1, "wpabuf_dup;eap_aka_add_id_msg"),
-             (1, "wpabuf_resize;eap_aka_add_id_msg"),
+             (1, "wpabuf_alloc;eap_aka_add_id_msg"),
              (1, "eap_aka_getKey"),
              (1, "eap_aka_get_emsk"),
              (1, "eap_aka_get_session_id")]
@@ -5683,6 +5720,7 @@ def test_eap_proto_aka_errors(dev, apdev):
             dev[0].wait_disconnected()
             dev[0].dump_monitor()
 
+    hapd2.dump_monitor()
     tests = ["eap_sim_msg_add_encr_start;eap_aka_response_notification",
              "aes_128_cbc_encrypt;eap_aka_response_notification"]
     for func in tests:
@@ -5692,6 +5730,7 @@ def test_eap_proto_aka_errors(dev, apdev):
                            eap="AKA", identity="0232010000000000",
                            phase1="result_ind=1",
                            password="90dca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581:000000000123")
+            hapd2.wait_sta()
             dev[0].request("REAUTHENTICATE")
             ev = dev[0].wait_event(["CTRL-EVENT-EAP-METHOD"], timeout=5)
             if ev is None:
@@ -5700,7 +5739,9 @@ def test_eap_proto_aka_errors(dev, apdev):
             wait_fail_trigger(dev[0], "GET_FAIL")
             dev[0].request("REMOVE_NETWORK all")
             dev[0].dump_monitor()
+            hapd2.wait_sta_disconnect()
 
+    hapd2.dump_monitor()
     tests = ["eap_sim_parse_encr;eap_aka_process_notification_reauth"]
     for func in tests:
         with alloc_fail(dev[0], 1, func):
@@ -5709,6 +5750,7 @@ def test_eap_proto_aka_errors(dev, apdev):
                            eap="AKA", identity="0232010000000000",
                            phase1="result_ind=1",
                            password="90dca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581:000000000123")
+            hapd2.wait_sta()
             dev[0].request("REAUTHENTICATE")
             ev = dev[0].wait_event(["CTRL-EVENT-EAP-METHOD"], timeout=5)
             if ev is None:
@@ -5717,6 +5759,7 @@ def test_eap_proto_aka_errors(dev, apdev):
             wait_fail_trigger(dev[0], "GET_ALLOC_FAIL")
             dev[0].request("REMOVE_NETWORK all")
             dev[0].dump_monitor()
+            hapd2.wait_sta_disconnect()
 
 def test_eap_proto_aka_prime_errors(dev, apdev):
     """EAP-AKA' protocol tests (error paths)"""
@@ -6461,6 +6504,10 @@ def run_eap_ikev2_connect(dev):
     dev.request("REMOVE_NETWORK all")
     if not ev or "CTRL-EVENT-DISCONNECTED" not in ev:
         dev.wait_disconnected()
+    ev = dev.wait_event(["CTRL-EVENT-NETWORK-REMOVED"], timeout=1)
+    if ev is None:
+        raise Exception("Network removal not reported")
+    time.sleep(0.01)
     dev.dump_monitor()
 
 def test_eap_proto_ikev2_errors_server(dev, apdev):
@@ -8160,7 +8207,6 @@ def test_eap_proto_pwd_errors(dev, apdev):
              (3, "crypto_bignum_init_set;compute_password_element"),
              (1, "crypto_bignum_to_bin;compute_password_element"),
              (1, "crypto_ec_point_compute_y_sqr;compute_password_element"),
-             (1, "crypto_ec_point_solve_y_coord;compute_password_element"),
              (1, "crypto_bignum_rand;compute_password_element"),
              (1, "crypto_bignum_sub;compute_password_element")]
     for count, func in funcs:
@@ -8902,21 +8948,21 @@ def test_eap_proto_ttls_errors(dev, apdev):
             dev[0].wait_disconnected()
 
     tests = [(1, "eap_peer_tls_derive_key;eap_ttls_v0_derive_key",
-              "DOMAIN\mschapv2 user", "auth=MSCHAPV2"),
+              "DOMAIN\\mschapv2 user", "auth=MSCHAPV2"),
              (1, "eap_peer_tls_derive_session_id;eap_ttls_v0_derive_key",
-              "DOMAIN\mschapv2 user", "auth=MSCHAPV2"),
+              "DOMAIN\\mschapv2 user", "auth=MSCHAPV2"),
              (1, "wpabuf_alloc;eap_ttls_phase2_request_mschapv2",
-              "DOMAIN\mschapv2 user", "auth=MSCHAPV2"),
+              "DOMAIN\\mschapv2 user", "auth=MSCHAPV2"),
              (1, "eap_peer_tls_derive_key;eap_ttls_phase2_request_mschapv2",
-              "DOMAIN\mschapv2 user", "auth=MSCHAPV2"),
+              "DOMAIN\\mschapv2 user", "auth=MSCHAPV2"),
              (1, "eap_peer_tls_encrypt;eap_ttls_encrypt_response;eap_ttls_implicit_identity_request",
-              "DOMAIN\mschapv2 user", "auth=MSCHAPV2"),
+              "DOMAIN\\mschapv2 user", "auth=MSCHAPV2"),
              (1, "eap_peer_tls_decrypt;eap_ttls_decrypt",
-              "DOMAIN\mschapv2 user", "auth=MSCHAPV2"),
+              "DOMAIN\\mschapv2 user", "auth=MSCHAPV2"),
              (1, "eap_ttls_getKey",
-              "DOMAIN\mschapv2 user", "auth=MSCHAPV2"),
+              "DOMAIN\\mschapv2 user", "auth=MSCHAPV2"),
              (1, "eap_ttls_get_session_id",
-              "DOMAIN\mschapv2 user", "auth=MSCHAPV2"),
+              "DOMAIN\\mschapv2 user", "auth=MSCHAPV2"),
              (1, "eap_ttls_get_emsk",
               "mschapv2 user@domain", "auth=MSCHAPV2"),
              (1, "wpabuf_alloc;eap_ttls_phase2_request_mschap",
@@ -8978,7 +9024,8 @@ def test_eap_proto_ttls_errors(dev, apdev):
         with fail_test(dev[0], count, func):
             dev[0].connect("eap-test", key_mgmt="WPA-EAP", scan_freq="2412",
                            eap="TTLS", anonymous_identity="ttls",
-                           identity="DOMAIN\mschapv2 user", password="password",
+                           identity="DOMAIN\\mschapv2 user",
+                           password="password",
                            ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2",
                            erp="1", wait_connect=False)
             ev = dev[0].wait_event(["CTRL-EVENT-EAP-PROPOSED-METHOD"],

@@ -17,7 +17,7 @@ import struct
 import hostapd
 from wpasupplicant import WpaSupplicant
 from tshark import run_tshark
-from utils import alloc_fail, wait_fail_trigger, skip_with_fips, HwsimSkip
+from utils import *
 from hwsim import HWSimRadio
 
 def hs20_ap_params():
@@ -169,11 +169,14 @@ def _test_gas_rand_ta(dev, apdev, logdir):
         raise Exception("GAS query timed out")
     get_gas_response(dev[0], bssid, ev, extra_test=True)
 
+    time.sleep(1)
     out = run_tshark(os.path.join(logdir, "hwsim0.pcapng"),
                      "wlan_mgt.fixed.category_code == 4 && (wlan_mgt.fixed.publicact == 0x0a || wlan_mgt.fixed.publicact == 0x0b)",
                      display=["wlan.ta", "wlan.ra"])
+    logger.info("tshark output:\n" + out)
     res = out.splitlines()
     if len(res) != 2:
+        logger.info("res: " + str(res))
         raise Exception("Unexpected number of GAS frames")
     req_ta = res[0].split('\t')[0]
     resp_ra = res[1].split('\t')[1]
@@ -188,7 +191,7 @@ def test_gas_concurrent_scan(dev, apdev):
     bssid = apdev[0]['bssid']
     params = hs20_ap_params()
     params['hessid'] = bssid
-    hostapd.add_ap(apdev[0], params)
+    hapd = hostapd.add_ap(apdev[0], params)
 
     # get BSS entry available to allow GAS query
     dev[0].scan_for_bss(bssid, freq="2412", force_scan=True)
@@ -221,19 +224,23 @@ def test_gas_concurrent_scan(dev, apdev):
     if responses != 4:
         raise Exception("Unexpected number of GAS responses")
 
+    # Try to get all GAS frames into the sniffer capture of this test case.
+    hapd.disable()
+    time.sleep(0.1)
+
 def test_gas_concurrent_connect(dev, apdev):
     """Generic GAS queries with concurrent connection operation"""
     skip_with_fips(dev[0])
     bssid = apdev[0]['bssid']
     params = hs20_ap_params()
     params['hessid'] = bssid
-    hostapd.add_ap(apdev[0], params)
+    hapd = hostapd.add_ap(apdev[0], params)
 
     dev[0].scan_for_bss(bssid, freq="2412", force_scan=True)
 
     logger.debug("Start concurrent connect and GAS request")
     dev[0].connect("test-gas", key_mgmt="WPA-EAP", eap="TTLS",
-                   identity="DOMAIN\mschapv2 user", anonymous_identity="ttls",
+                   identity="DOMAIN\\mschapv2 user", anonymous_identity="ttls",
                    password="password", phase2="auth=MSCHAPV2",
                    ca_cert="auth_serv/ca.pem", wait_connect=False,
                    scan_freq="2412")
@@ -256,8 +263,10 @@ def test_gas_concurrent_connect(dev, apdev):
         raise Exception("Unexpected operation order")
     get_gas_response(dev[0], bssid, ev)
 
+    hapd.wait_sta()
     dev[0].request("DISCONNECT")
     dev[0].wait_disconnected(timeout=5)
+    hapd.wait_sta_disconnect()
 
     logger.debug("Wait six seconds for expiration of connect-without-scan")
     time.sleep(6)
@@ -278,7 +287,7 @@ def test_gas_concurrent_connect(dev, apdev):
     if ev is None:
         raise Exception("No new scan results reported")
 
-    ev = dev[0].wait_connected(timeout=20, error="Operation tiemd out")
+    ev = dev[0].wait_connected(timeout=20, error="Operation timed out")
     if "CTRL-EVENT-CONNECTED" not in ev:
         raise Exception("Unexpected operation order")
 
@@ -487,6 +496,25 @@ def test_gas_anqp_get(dev, apdev):
         if "FAIL" not in dev[0].request("HS20_ANQP_GET " + cmd):
             raise Exception("Invalid HS20_ANQP_GET accepted")
 
+def test_gas_anqp_get_no_scan(dev, apdev):
+    """GAS/ANQP query without scan"""
+    hapd = start_ap(apdev[0])
+    bssid = apdev[0]['bssid']
+    if "OK" not in dev[0].request("ANQP_GET " + bssid + " freq=2412 258"):
+        raise Exception("ANQP_GET command failed")
+    ev = dev[0].wait_event(["ANQP-QUERY-DONE"], timeout=10)
+    if ev is None:
+        raise Exception("ANQP query timed out")
+    dev[0].dump_monitor()
+
+    if "OK" not in dev[0].request("ANQP_GET 02:11:22:33:44:55 freq=2417 258"):
+        raise Exception("ANQP_GET command failed")
+    ev = dev[0].wait_event(["ANQP-QUERY-DONE"], timeout=10)
+    if ev is None:
+        raise Exception("ANQP query timed out [2]")
+    if "result=FAILURE" not in ev:
+        raise Exception("Unexpected result: " + ev)
+
 def test_gas_anqp_get_oom(dev, apdev):
     """GAS/ANQP query OOM"""
     hapd = start_ap(apdev[0])
@@ -502,34 +530,6 @@ def test_gas_anqp_get_oom(dev, apdev):
     with alloc_fail(dev[0], 1, "gas_query_req;hs20_anqp_send_req"):
         if "FAIL" not in dev[0].request("HS20_ANQP_GET " + bssid + " 1"):
             raise Exception("HS20_ANQP_GET command accepted during OOM")
-    with alloc_fail(dev[0], 1, "=hs20_anqp_send_req"):
-        if "FAIL" not in dev[0].request("REQ_HS20_ICON " + bssid + " w1fi_logo"):
-            raise Exception("REQ_HS20_ICON command accepted during OOM")
-    with alloc_fail(dev[0], 2, "=hs20_anqp_send_req"):
-        if "FAIL" not in dev[0].request("REQ_HS20_ICON " + bssid + " w1fi_logo"):
-            raise Exception("REQ_HS20_ICON command accepted during OOM")
-
-def test_gas_anqp_icon_binary_proto(dev, apdev):
-    """GAS/ANQP and icon binary protocol testing"""
-    hapd = start_ap(apdev[0])
-    bssid = apdev[0]['bssid']
-
-    dev[0].scan_for_bss(bssid, freq="2412", force_scan=True)
-    hapd.set("ext_mgmt_frame_handling", "1")
-
-    tests = ['010000', '01000000', '00000000', '00030000', '00020000',
-             '00000100', '0001ff0100ee', '0001ff0200ee']
-    for test in tests:
-        dev[0].request("HS20_ICON_REQUEST " + bssid + " w1fi_logo")
-        query = gas_rx(hapd)
-        gas = parse_gas(query['payload'])
-        resp = action_response(query)
-        data = binascii.unhexlify(test)
-        data = binascii.unhexlify('506f9a110b00') + data
-        data = struct.pack('<HHH', len(data) + 4, 0xdddd, len(data)) + data
-        resp['payload'] = anqp_initial_resp(gas['dialog_token'], 0) + data
-        send_gas_resp(hapd, resp)
-        expect_gas_result(dev[0], "SUCCESS")
 
 def test_gas_anqp_hs20_proto(dev, apdev):
     """GAS/ANQP and Hotspot 2.0 element protocol testing"""
@@ -1304,11 +1304,14 @@ def _test_gas_anqp_address3_not_assoc(dev, apdev, params):
     if "result=SUCCESS" not in ev:
         raise Exception("Unexpected result: " + ev)
 
+    time.sleep(1)
     out = run_tshark(os.path.join(params['logdir'], "hwsim0.pcapng"),
                      "wlan_mgt.fixed.category_code == 4 && (wlan_mgt.fixed.publicact == 0x0a || wlan_mgt.fixed.publicact == 0x0b)",
                      display=["wlan.bssid"])
+    logger.info("tshark output:\n" + out)
     res = out.splitlines()
     if len(res) != 2:
+        logger.info("res: " + str(res))
         raise Exception("Unexpected number of GAS frames")
     if res[0] != 'ff:ff:ff:ff:ff:ff':
         raise Exception("GAS request used unexpected Address3 field value: " + res[0])
@@ -1331,9 +1334,10 @@ def _test_gas_anqp_address3_assoc(dev, apdev, params):
 
     dev[0].scan_for_bss(bssid, freq="2412")
     dev[0].connect("test-gas", key_mgmt="WPA-EAP", eap="TTLS",
-                   identity="DOMAIN\mschapv2 user", anonymous_identity="ttls",
+                   identity="DOMAIN\\mschapv2 user", anonymous_identity="ttls",
                    password="password", phase2="auth=MSCHAPV2",
                    ca_cert="auth_serv/ca.pem", scan_freq="2412")
+    hapd.wait_sta()
 
     if "OK" not in dev[0].request("ANQP_GET " + bssid + " 258"):
         raise Exception("ANQP_GET command failed")
@@ -1356,11 +1360,14 @@ def _test_gas_anqp_address3_assoc(dev, apdev, params):
     if "result=SUCCESS" not in ev:
         raise Exception("Unexpected result: " + ev)
 
+    time.sleep(1)
     out = run_tshark(os.path.join(params['logdir'], "hwsim0.pcapng"),
                      "wlan_mgt.fixed.category_code == 4 && (wlan_mgt.fixed.publicact == 0x0a || wlan_mgt.fixed.publicact == 0x0b)",
                      display=["wlan.bssid"])
+    logger.info("tshark output:\n" + out)
     res = out.splitlines()
     if len(res) != 2:
+        logger.info("res: " + str(res))
         raise Exception("Unexpected number of GAS frames")
     if res[0] != bssid:
         raise Exception("GAS request used unexpected Address3 field value: " + res[0])
@@ -1395,11 +1402,14 @@ def test_gas_anqp_address3_ap_forced(dev, apdev, params):
     if "result=SUCCESS" not in ev:
         raise Exception("Unexpected result: " + ev)
 
+    time.sleep(1)
     out = run_tshark(os.path.join(params['logdir'], "hwsim0.pcapng"),
                      "wlan_mgt.fixed.category_code == 4 && (wlan_mgt.fixed.publicact == 0x0a || wlan_mgt.fixed.publicact == 0x0b)",
                      display=["wlan.bssid"])
+    logger.info("tshark output:\n" + out)
     res = out.splitlines()
     if len(res) != 2:
+        logger.info("res: " + str(res))
         raise Exception("Unexpected number of GAS frames")
     if res[0] != bssid:
         raise Exception("GAS request used unexpected Address3 field value: " + res[0])
@@ -1443,11 +1453,14 @@ def _test_gas_anqp_address3_ap_non_compliant(dev, apdev, params):
     if "result=SUCCESS" not in ev:
         raise Exception("Unexpected result: " + ev)
 
+    time.sleep(1)
     out = run_tshark(os.path.join(params['logdir'], "hwsim0.pcapng"),
                      "wlan_mgt.fixed.category_code == 4 && (wlan_mgt.fixed.publicact == 0x0a || wlan_mgt.fixed.publicact == 0x0b)",
                      display=["wlan.bssid"])
+    logger.info("tshark output:\n" + out)
     res = out.splitlines()
     if len(res) != 2:
+        logger.info("res: " + str(res))
         raise Exception("Unexpected number of GAS frames")
     if res[0] != 'ff:ff:ff:ff:ff:ff':
         raise Exception("GAS request used unexpected Address3 field value: " + res[0])
@@ -1472,10 +1485,11 @@ def _test_gas_anqp_address3_pmf(dev, apdev):
 
     dev[0].scan_for_bss(bssid, freq="2412")
     dev[0].connect("test-gas", key_mgmt="WPA-EAP", eap="TTLS",
-                   identity="DOMAIN\mschapv2 user", anonymous_identity="ttls",
+                   identity="DOMAIN\\mschapv2 user", anonymous_identity="ttls",
                    password="password", phase2="auth=MSCHAPV2",
                    ca_cert="auth_serv/ca.pem", scan_freq="2412",
                    ieee80211w="2")
+    hapd.wait_sta()
 
     if "OK" not in dev[0].request("ANQP_GET " + bssid + " 258"):
         raise Exception("ANQP_GET command failed")
@@ -1510,10 +1524,11 @@ def test_gas_prot_vs_not_prot(dev, apdev, params):
 
     dev[0].scan_for_bss(bssid, freq="2412")
     dev[0].connect("test-gas", key_mgmt="WPA-EAP", eap="TTLS",
-                   identity="DOMAIN\mschapv2 user", anonymous_identity="ttls",
+                   identity="DOMAIN\\mschapv2 user", anonymous_identity="ttls",
                    password="password", phase2="auth=MSCHAPV2",
                    ca_cert="auth_serv/ca.pem", scan_freq="2412",
                    ieee80211w="2")
+    hapd.wait_sta()
 
     if "OK" not in dev[0].request("ANQP_GET " + bssid + " 258"):
         raise Exception("ANQP_GET command failed")
@@ -1586,10 +1601,11 @@ def test_gas_failures(dev, apdev):
     wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
     wpas.interface_add("wlan5")
     wpas.scan_for_bss(bssid2, freq="2412")
-    wpas.request("SET preassoc_mac_addr 1111")
-    wpas.request("ANQP_GET " + bssid2 + " 258")
-    ev = wpas.wait_event(["Failed to assign random MAC address for GAS"],
-                         timeout=5)
+    wpas.request("SET preassoc_mac_addr 1")
+    with fail_test(wpas, 1, "random_mac_addr"):
+        wpas.request("ANQP_GET " + bssid2 + " 258")
+        ev = wpas.wait_event(["Failed to assign random MAC address for GAS"],
+                             timeout=5)
     wpas.request("SET preassoc_mac_addr 0")
     if ev is None:
         raise Exception("No random MAC address error seen")
@@ -1622,6 +1638,7 @@ def test_gas_anqp_venue_url(dev, apdev):
     hapd = hostapd.add_ap(apdev[0], params)
     bssid = apdev[0]['bssid']
 
+    dev[0].flush_scan_cache()
     dev[0].scan_for_bss(bssid, freq="2412", force_scan=True)
     if "OK" not in dev[0].request("ANQP_GET " + bssid + " 257,258,277"):
         raise Exception("ANQP_GET command failed")
@@ -1651,6 +1668,11 @@ def test_gas_anqp_venue_url(dev, apdev):
     if not bss['anqp_capability_list'].startswith(binascii.hexlify(ids).decode()):
         raise Exception("Unexpected Capability List ANQP-element value: " + bss['anqp_capability_list'])
 
+    if "anqp[277]" not in bss:
+        raise Exception("Venue-URL ANQP info not available")
+    if "protected-anqp-info[277]" in bss:
+        raise Exception("Unexpected Venue-URL protection info")
+
 def test_gas_anqp_venue_url2(dev, apdev):
     """GAS/ANQP and Venue URL (hostapd venue_url)"""
     venue_group = 1
@@ -1679,6 +1701,7 @@ def test_gas_anqp_venue_url2(dev, apdev):
     hapd = hostapd.add_ap(apdev[0], params)
     bssid = apdev[0]['bssid']
 
+    dev[0].flush_scan_cache()
     dev[0].scan_for_bss(bssid, freq="2412", force_scan=True)
     if "OK" not in dev[0].request("ANQP_GET " + bssid + " 257,258,277"):
         raise Exception("ANQP_GET command failed")
@@ -1735,8 +1758,10 @@ def test_gas_anqp_venue_url_pmf(dev, apdev):
     hapd = hostapd.add_ap(apdev[0], params)
     bssid = apdev[0]['bssid']
 
+    dev[0].flush_scan_cache()
     dev[0].connect("gas/anqp/pmf", psk="12345678", ieee80211w="2",
                    scan_freq="2412")
+    hapd.wait_sta()
     if "OK" not in dev[0].request("ANQP_GET " + bssid + " 277"):
         raise Exception("ANQP_GET command failed")
 
@@ -1756,6 +1781,14 @@ def test_gas_anqp_venue_url_pmf(dev, apdev):
     if "2 " + url2 not in ev:
         raise Exception("Unexpected Venue URL information (2): " + ev)
 
+    bss = dev[0].get_bss(bssid)
+    if "anqp[277]" not in bss:
+        raise Exception("Venue-URL ANQP info not available")
+    if "protected-anqp-info[277]" not in bss:
+        raise Exception("Venue-URL protection info not available")
+    if bss["protected-anqp-info[277]"] != "1":
+        raise Exception("Venue-URL was not indicated to be protected")
+
 def test_gas_anqp_capab_list(dev, apdev):
     """GAS/ANQP and Capability List ANQP-element"""
     params = {"ssid": "gas/anqp",
@@ -1767,6 +1800,7 @@ def test_gas_anqp_capab_list(dev, apdev):
     hapd = hostapd.add_ap(apdev[0], params)
     bssid = apdev[0]['bssid']
 
+    dev[0].flush_scan_cache()
     dev[0].scan_for_bss(bssid, freq="2412", force_scan=True)
     if "OK" not in dev[0].request("ANQP_GET " + bssid + " 257"):
         raise Exception("ANQP_GET command failed")
@@ -1946,8 +1980,6 @@ def test_gas_vendor_spec_errors(dev, apdev):
     bssid = apdev[0]['bssid']
     params = hs20_ap_params()
     params['hessid'] = bssid
-    params['osu_server_uri'] = "uri"
-    params['hs20_icon'] = "32:32:eng:image/png:icon32:/tmp/icon32.png"
     del params['nai_realm']
     hapd = hostapd.add_ap(apdev[0], params)
 

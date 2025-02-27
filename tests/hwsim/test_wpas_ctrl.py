@@ -74,14 +74,14 @@ def test_wpas_ctrl_network(dev):
              ("freq_list", "2412 2417"),
              ("scan_ssid", "1"),
              ("bssid", "00:11:22:33:44:55"),
-             ("proto", "WPA RSN OSEN"),
+             ("proto", "WPA RSN"),
              ("eap", "TLS"),
              ("go_p2p_dev_addr", "22:33:44:55:66:aa"),
              ("p2p_client_list", "22:33:44:55:66:bb 02:11:22:33:44:55")]
     if "SAE" not in dev[0].get_capability("auth_alg"):
-        tests.append(("key_mgmt", "WPS OSEN"))
+        tests.append(("key_mgmt", "WPS"))
     else:
-        tests.append(("key_mgmt", "WPS SAE FT-SAE OSEN"))
+        tests.append(("key_mgmt", "WPS SAE FT-SAE"))
 
     dev[0].set_network_quoted(id, "ssid", "test")
     for field, value in tests:
@@ -266,14 +266,14 @@ def test_wpas_ctrl_network(dev):
              "f2:99:88:77:66:55 02:11:22:33:44:55/ff:00:ff:00:ff:00 12:34:56:78:90:ab",
              "02:11:22:33:44:55/ff:ff:ff:00:00:00 02:ae:be:ce:53:77/00:00:00:00:00:ff"]
     for val in tests:
-        dev[0].set_network(id, "bssid_blacklist", val)
-        res = dev[0].get_network(id, "bssid_blacklist")
+        dev[0].set_network(id, "bssid_ignore", val)
+        res = dev[0].get_network(id, "bssid_ignore")
         if res != val:
-            raise Exception("Unexpected bssid_blacklist value: %s != %s" % (res, val))
-        dev[0].set_network(id, "bssid_whitelist", val)
-        res = dev[0].get_network(id, "bssid_whitelist")
+            raise Exception("Unexpected bssid_ignore value: %s != %s" % (res, val))
+        dev[0].set_network(id, "bssid_accept", val)
+        res = dev[0].get_network(id, "bssid_accept")
         if res != val:
-            raise Exception("Unexpected bssid_whitelist value: %s != %s" % (res, val))
+            raise Exception("Unexpected bssid_accept value: %s != %s" % (res, val))
 
     tests = ["foo",
              "00:11:22:33:44:5",
@@ -281,8 +281,8 @@ def test_wpas_ctrl_network(dev):
              "00:11:22:33:44:55/",
              "00:11:22:33:44:55/66:77:88:99:aa:b"]
     for val in tests:
-        if "FAIL" not in dev[0].request("SET_NETWORK %d bssid_blacklist %s" % (id, val)):
-            raise Exception("Invalid bssid_blacklist value accepted")
+        if "FAIL" not in dev[0].request("SET_NETWORK %d bssid_ignore %s" % (id, val)):
+            raise Exception("Invalid bssid_ignore value accepted")
 
 @remote_compatible
 def test_wpas_ctrl_network_oom(dev):
@@ -301,8 +301,17 @@ def test_wpas_ctrl_network_oom(dev):
 @remote_compatible
 def test_wpas_ctrl_many_networks(dev, apdev):
     """wpa_supplicant ctrl_iface LIST_NETWORKS with huge number of networks"""
-    for i in range(1000):
-        id = dev[0].add_network()
+    for i in range(999):
+        dev[0].add_network()
+        dev[0].dump_monitor()
+    id = dev[0].add_network()
+    ev = dev[0].wait_event(["CTRL-EVENT-NETWORK-ADDED %d" % id])
+    if ev is None:
+        raise Exception("Network added event not seen for the last network")
+    ev = dev[0].wait_global_event(["CTRL-EVENT-NETWORK-ADDED %d" % id], timeout=10)
+    if ev is None:
+        raise Exception("Network added event (global) not seen for the last network")
+    dev[0].dump_monitor()
     res = dev[0].request("LIST_NETWORKS")
     if str(id) in res:
         raise Exception("Last added network was unexpectedly included")
@@ -313,6 +322,25 @@ def test_wpas_ctrl_many_networks(dev, apdev):
     # power CPU, so increase the command timeout significantly to avoid issues
     # with the test case failing and following reset operation timing out.
     dev[0].request("REMOVE_NETWORK all", timeout=60)
+    seen = seen_global = False
+
+    for i in range(1000):
+        ev = dev[0].wait_event(["CTRL-EVENT-NETWORK-REMOVED"])
+        if ev is None:
+            raise Exception("Network removed event not seen for the last network")
+        if str(id) in ev:
+            seen = True
+        ev = dev[0].wait_global_event(["CTRL-EVENT-NETWORK-REMOVED"],
+                                      timeout=10)
+        if ev is None:
+            raise Exception("Network removed event (global) not seen for the last network")
+        if str(id) in ev:
+            seen_global = True
+    if not seen:
+            raise Exception("Network removed event not seen for the last network")
+    if not seen_global:
+            raise Exception("Network removed event (global) not seen for the last network")
+    dev[0].dump_monitor()
 
 @remote_compatible
 def test_wpas_ctrl_dup_network(dev, apdev):
@@ -453,6 +481,14 @@ def test_wpas_ctrl_cred(dev):
     for i in ("11", "1122", "112233445566778899aabbccddeeff00"):
         if "FAIL" not in dev[0].request("SET_CRED " + str(id) + " roaming_consortium " + i):
             raise Exception("Unexpected success on invalid roaming_consortium")
+        if "FAIL" not in dev[0].request("SET_CRED " + str(id) + " home_ois " + '"' + i + '"'):
+            raise Exception("Unexpected success on invalid home_ois")
+        if "FAIL" not in dev[0].request("SET_CRED " + str(id) + " required_home_ois " + '"' + i + '"'):
+            raise Exception("Unexpected success on invalid required_home_ois")
+    if "FAIL" not in dev[0].request("SET_CRED " + str(id) + " home_ois " + '"112233' + 36*",112233" + '"'):
+            raise Exception("Unexpected success on invalid home_ois")
+    if "FAIL" in dev[0].request("SET_CRED " + str(id) + " home_ois " + '"112233' + 35*",112233" + '"'):
+            raise Exception("Unexpected failure on maximum number of home_ois")
 
     dev[0].set_cred(id, "excluded_ssid", "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
     if "FAIL" not in dev[0].request("SET_CRED " + str(id) + " excluded_ssid 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00"):
@@ -687,8 +723,8 @@ def test_wpas_ctrl_addr(dev):
         raise Exception("Unexpected success on invalid WPS_REG")
     if "FAIL" not in dev[0].request("IBSS_RSN 00:11:22:33:44"):
         raise Exception("Unexpected success on invalid IBSS_RSN")
-    if "FAIL" not in dev[0].request("BLACKLIST 00:11:22:33:44"):
-        raise Exception("Unexpected success on invalid BLACKLIST")
+    if "FAIL" not in dev[0].request("BSSID_IGNORE 00:11:22:33:44"):
+        raise Exception("Unexpected success on invalid BSSID_IGNORE")
 
 @remote_compatible
 def test_wpas_ctrl_wps_errors(dev):
@@ -1078,43 +1114,43 @@ def test_wpas_ctrl_nfc_get_handover(dev):
         if "FAIL" in dev[0].request("NFC_GET_HANDOVER_SEL " + v):
             raise Exception("Unexpected NFC_GET_HANDOVER_SEL failure for " + v)
 
-def get_blacklist(dev):
-    return dev.request("BLACKLIST").splitlines()
+def get_bssid_ignore_list(dev):
+    return dev.request("BSSID_IGNORE").splitlines()
 
 @remote_compatible
-def test_wpas_ctrl_blacklist(dev):
-    """wpa_supplicant ctrl_iface BLACKLIST"""
-    if "OK" not in dev[0].request("BLACKLIST clear"):
-        raise Exception("BLACKLIST clear failed")
-    b = get_blacklist(dev[0])
+def test_wpas_ctrl_bssid_ignore(dev):
+    """wpa_supplicant ctrl_iface BSSID_IGNORE"""
+    if "OK" not in dev[0].request("BSSID_IGNORE clear"):
+        raise Exception("BSSID_IGNORE clear failed")
+    b = get_bssid_ignore_list(dev[0])
     if len(b) != 0:
-        raise Exception("Unexpected blacklist contents: " + str(b))
-    if "OK" not in dev[0].request("BLACKLIST 00:11:22:33:44:55"):
-        raise Exception("BLACKLIST add failed")
-    b = get_blacklist(dev[0])
+        raise Exception("Unexpected BSSID ignore list contents: " + str(b))
+    if "OK" not in dev[0].request("BSSID_IGNORE 00:11:22:33:44:55"):
+        raise Exception("BSSID_IGNORE add failed")
+    b = get_bssid_ignore_list(dev[0])
     if "00:11:22:33:44:55" not in b:
-        raise Exception("Unexpected blacklist contents: " + str(b))
-    if "OK" not in dev[0].request("BLACKLIST 00:11:22:33:44:56"):
-        raise Exception("BLACKLIST add failed")
-    b = get_blacklist(dev[0])
+        raise Exception("Unexpected BSSID ignore list contents: " + str(b))
+    if "OK" not in dev[0].request("BSSID_IGNORE 00:11:22:33:44:56"):
+        raise Exception("BSSID_IGNORE add failed")
+    b = get_bssid_ignore_list(dev[0])
     if "00:11:22:33:44:55" not in b or "00:11:22:33:44:56" not in b:
-        raise Exception("Unexpected blacklist contents: " + str(b))
-    if "OK" not in dev[0].request("BLACKLIST 00:11:22:33:44:56"):
-        raise Exception("BLACKLIST add failed")
-    b = get_blacklist(dev[0])
+        raise Exception("Unexpected BSSID ignore list contents: " + str(b))
+    if "OK" not in dev[0].request("BSSID_IGNORE 00:11:22:33:44:56"):
+        raise Exception("BSSID_IGNORE add failed")
+    b = get_bssid_ignore_list(dev[0])
     if "00:11:22:33:44:55" not in b or "00:11:22:33:44:56" not in b or len(b) != 2:
-        raise Exception("Unexpected blacklist contents: " + str(b))
+        raise Exception("Unexpected BSSID ignore list contents: " + str(b))
 
-    if "OK" not in dev[0].request("BLACKLIST clear"):
-        raise Exception("BLACKLIST clear failed")
-    if dev[0].request("BLACKLIST") != "":
-        raise Exception("Unexpected blacklist contents")
+    if "OK" not in dev[0].request("BSSID_IGNORE clear"):
+        raise Exception("BSSID_IGNORE clear failed")
+    if dev[0].request("BSSID_IGNORE") != "":
+        raise Exception("Unexpected BSSID ignore list contents")
 
 @remote_compatible
-def test_wpas_ctrl_blacklist_oom(dev):
-    """wpa_supplicant ctrl_iface BLACKLIST and out-of-memory"""
-    with alloc_fail(dev[0], 1, "wpa_blacklist_add"):
-        if "FAIL" not in dev[0].request("BLACKLIST aa:bb:cc:dd:ee:ff"):
+def test_wpas_ctrl_bssid_ignore_oom(dev):
+    """wpa_supplicant ctrl_iface BSSID_IGNORE and out-of-memory"""
+    with alloc_fail(dev[0], 1, "wpa_bssid_ignore_add"):
+        if "FAIL" not in dev[0].request("BSSID_IGNORE aa:bb:cc:dd:ee:ff"):
             raise Exception("Unexpected success with allocation failure")
 
 def test_wpas_ctrl_log_level(dev):
@@ -1344,6 +1380,32 @@ def test_wpas_ctrl_rsp(dev, apdev):
         if "OK" not in dev[0].request("CTRL-RSP-%s-%d:" % (req, id)):
             raise Exception("Request failed unexpectedly")
 
+def test_wpas_ctrl_vendor_test(dev, apdev):
+    """wpas_supplicant and VENDOR test command"""
+    OUI_QCA = 0x001374
+    QCA_NL80211_VENDOR_SUBCMD_TEST = 1
+    QCA_WLAN_VENDOR_ATTR_TEST = 8
+    attr = struct.pack("@HHI", 4 + 4, QCA_WLAN_VENDOR_ATTR_TEST, 123)
+    cmd = "VENDOR %x %d %s" % (OUI_QCA, QCA_NL80211_VENDOR_SUBCMD_TEST, binascii.hexlify(attr).decode())
+
+    res = dev[0].request(cmd)
+    if "FAIL" in res:
+        raise Exception("VENDOR command failed")
+    val, = struct.unpack("@I", binascii.unhexlify(res))
+    if val != 125:
+        raise Exception("Incorrect response value")
+
+    res = dev[0].request(cmd + " nested=1")
+    if "FAIL" in res:
+        raise Exception("VENDOR command failed")
+    val, = struct.unpack("@I", binascii.unhexlify(res))
+    if val != 125:
+        raise Exception("Incorrect response value")
+
+    res = dev[0].request(cmd + " nested=0")
+    if "FAIL" not in res:
+        raise Exception("VENDOR command with invalid (not nested) data accepted")
+
 @remote_compatible
 def test_wpas_ctrl_vendor(dev, apdev):
     """wpa_supplicant ctrl_iface VENDOR"""
@@ -1376,6 +1438,8 @@ def test_wpas_ctrl_driver_event(dev, apdev):
     """wpa_supplicant ctrl_iface DRIVER_EVENT"""
     if "FAIL" not in dev[0].request("DRIVER_EVENT foo"):
         raise Exception("Invalid DRIVER_EVENT accepted")
+    if "OK" not in dev[0].request("DRIVER_EVENT ASSOC reassoc=1 req_ies=0000 resp_ies=0000 resp_frame=0000 beacon_ies=0000 freq=2412 wmm::info_bitmap=0 wmm::uapsd_queues=0 addr=02:02:02:02:02:02 authorized=0 key_replay_ctr=00 ptk_kck=00 ptk_kek=00 subnet_status=0 fils_erp_next_seq_num=0 fils_pmk=00 fils_pmkid=" + 16*"00"):
+        raise Exception("DRIVER_EVENT ASSOC did not succeed")
 
 @remote_compatible
 def test_wpas_ctrl_eapol_rx(dev, apdev):
@@ -1817,8 +1881,6 @@ def test_wpas_ctrl_error(dev):
              ('WPS_NFC_TOKEN NDEF', 'FAIL',
               2, 'wpa_supplicant_ctrl_iface_wps_nfc_token'),
              ('NFC_GET_HANDOVER_REQ NDEF P2P-CR', None,
-              1, 'wpas_p2p_nfc_handover'),
-             ('NFC_GET_HANDOVER_REQ NDEF P2P-CR', None,
               1, 'wps_build_nfc_handover_req_p2p')]
     for cmd, exp, count, func in tests:
         with fail_test(dev[0], count, func):
@@ -2121,3 +2183,11 @@ def test_wpas_ctrl_get_pref_freq_list_override(dev):
     dev[0].set("get_pref_freq_list_override", "")
     res = dev[0].request("GET_PREF_FREQ_LIST STATION").strip()
     logger.info("STATION (without override): " + res)
+
+def test_wpas_ctrl_interface_add_driver_init_failure(dev, apdev):
+    """wpa_supplicant INTERFACE_ADD and driver init failing"""
+    for i in range(1000):
+        res = dev[0].global_request("INTERFACE_ADD FOO")
+        if "FAIL" not in res:
+            raise Exception("Unexpected result: " + res)
+    dev[0].dump_monitor()

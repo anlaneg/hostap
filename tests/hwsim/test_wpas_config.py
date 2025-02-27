@@ -117,7 +117,6 @@ config_checks = [("ap_scan", "0"),
                  ("dot11RSNAConfigSATimeout", "61"),
                  ("sec_device_type", "12345-0050F204-54321"),
                  ("autoscan", "exponential:3:300"),
-                 ("osu_dir", "/tmp/osu"),
                  ("fst_group_id", "bond0"),
                  ("fst_priority", "5"),
                  ("fst_llt", "7"),
@@ -191,6 +190,16 @@ def test_wpas_config_file(dev, apdev, params):
                 f.write("                    ")
             f.write("foo\n")
             f.write("device_name=name#foo\n")
+            f.write("network={\n")
+            f.write("\tkey_mgmt=NONE\n")
+            f.write('\tssid="hello"\n')
+            f.write('\tgroup=GCMP # "foo"\n')
+            f.write("}\n")
+            f.write("network={\n")
+            f.write("\tdisabled=2\n")
+            f.write("\tkey_mgmt=NONE\n")
+            f.write("\tp2p2_client_list=1 4 7 9 900\n")
+            f.write("}\n")
 
         wpas.interface_add("wlan5", config=config)
         capa = {}
@@ -218,8 +227,8 @@ def test_wpas_config_file(dev, apdev, params):
         wpas.set_cred_quoted(id, "provisioning_sp", "example.com")
         wpas.set_cred_quoted(id, "domain", "example.com")
         wpas.set_cred_quoted(id, "domain_suffix_match", "example.com")
-        wpas.set_cred(id, "roaming_consortium", "112233")
-        wpas.set_cred(id, "required_roaming_consortium", "112233")
+        wpas.set_cred_quoted(id, "home_ois", "112233,445566")
+        wpas.set_cred_quoted(id, "required_home_ois", "112233")
         wpas.set_cred_quoted(id, "roaming_consortiums",
                              "112233,aabbccddee,445566")
         wpas.set_cred_quoted(id, "roaming_partner",
@@ -242,11 +251,17 @@ def test_wpas_config_file(dev, apdev, params):
 
         wpas.interface_remove("wlan5")
         data1 = check_config(capa, config)
+        if "group=GCMP" not in data1:
+            raise Exception("Network block group parameter with a comment not present")
+        if "p2p2_client_list=1 4 7 9 900" not in data1:
+            raise Exception("p2p2_client_list was not present")
 
         wpas.interface_add("wlan5", config=config)
-        if len(wpas.list_networks()) != 1:
+        if len(wpas.list_networks()) != 3:
             raise Exception("Unexpected number of networks")
-        if len(wpas.request("LIST_CREDS").splitlines()) != 2:
+        res = wpas.request("LIST_CREDS")
+        logger.info("Credentials:\n" + res)
+        if len(res.splitlines()) != 2:
             raise Exception("Unexpected number of credentials")
 
         val = wpas.get_cred(0, "roaming_consortiums")
@@ -284,9 +299,21 @@ def test_wpas_config_file(dev, apdev, params):
             os.rmdir(config)
         except:
             pass
+        if not wpas.ifname:
+            wpas.interface_add("wlan5")
         wpas.dump_monitor()
         wpas.request("SET country 00")
         wpas.wait_event(["CTRL-EVENT-REGDOM-CHANGE"], timeout=1)
+
+    country = False
+    for i in range(5):
+        ev = dev[0].wait_event(["CTRL-EVENT-REGDOM-CHANGE"], timeout=1)
+        if ev is None:
+            break
+        if "alpha2=FI" in ev:
+            country = True
+        if country and "type=WORLD" in ev:
+            break
 
 def test_wpas_config_file_wps(dev, apdev):
     """wpa_supplicant config file parsing/writing with WPS"""
@@ -296,7 +323,7 @@ def test_wpas_config_file_wps(dev, apdev):
 
     params = {"ssid": "test-wps", "eap_server": "1", "wps_state": "2",
               "skip_cred_build": "1", "extra_cred": "wps-ctrl-cred"}
-    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
+    hapd = hostapd.add_ap(apdev[0], params)
 
     wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
 
@@ -341,7 +368,7 @@ def test_wpas_config_file_wps2(dev, apdev):
 
     params = {"ssid": "test-wps", "eap_server": "1", "wps_state": "2",
               "skip_cred_build": "1", "extra_cred": "wps-ctrl-cred2"}
-    hapd = hostapd.add_ap(apdev[0]['ifname'], params)
+    hapd = hostapd.add_ap(apdev[0], params)
 
     wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
 
@@ -496,7 +523,7 @@ def test_wpas_config_file_set_global(dev):
                   "pcsc_pin", "driver_param", "manufacturer", "model_name",
                   "model_number", "serial_number", "config_methods",
                   "p2p_ssid_postfix", "autoscan", "ext_password_backend",
-                  "osu_dir", "wowlan_triggers", "fst_group_id",
+                  "wowlan_triggers", "fst_group_id",
                   "sched_scan_plans", "non_pref_chan"]
         for field in fields:
             if "FAIL" not in wpas.request('SET %s hello\nmodel_name=foobar' % field):
@@ -530,6 +557,7 @@ def test_wpas_config_file_set_global(dev):
 
 def test_wpas_config_file_key_mgmt(dev, apdev, params):
     """wpa_supplicant config file writing and key_mgmt values"""
+    check_fils_capa(dev[0])
     config = os.path.join(params['logdir'],
                           'wpas_config_file_key_mgmt.conf')
     if os.path.exists(config):
@@ -576,7 +604,7 @@ def test_wpas_config_file_key_mgmt(dev, apdev, params):
 
     tests = ["WPA-PSK", "WPA-EAP", "IEEE8021X", "NONE", "WPA-NONE", "FT-PSK",
              "FT-EAP", "FT-EAP-SHA384", "WPA-PSK-SHA256", "WPA-EAP-SHA256",
-             "SAE", "FT-SAE", "OSEN", "WPA-EAP-SUITE-B",
+             "SAE", "FT-SAE", "WPA-EAP-SUITE-B",
              "WPA-EAP-SUITE-B-192", "FILS-SHA256", "FILS-SHA384",
              "FT-FILS-SHA256", "FT-FILS-SHA384", "OWE", "DPP"]
     supported_key_mgmts = dev[0].get_capability("key_mgmt")
@@ -652,3 +680,177 @@ def test_wpas_config_update_without_file(dev, apdev):
     wpas.set("update_config", "1")
     if "FAIL" not in wpas.request("SAVE_CONFIG"):
         raise Exception("SAVE_CONFIG accepted unexpectedly")
+
+def test_wpas_config_file_invalid_network(dev, apdev, params):
+    """wpa_supplicant config file parsing of an invalid network"""
+    config = params['prefix'] + '.conf.wlan5'
+    wpas = WpaSupplicant(global_iface='/tmp/wpas-wlan5')
+    with open(config, "w") as f:
+        f.write("network={\n")
+        f.write("\tunknown=UNKNOWN\n")
+        f.write("}\n")
+    success = False
+    try:
+        wpas.interface_add("wlan5", config=config)
+        success = True
+    except Exception as e:
+        if str(e) != "Failed to add a dynamic wpa_supplicant interface":
+            raise
+
+    if success:
+        raise Exception("Interface addition succeeded with invalid configuration")
+
+def test_wpas_config_range_check(dev, apdev):
+    """wpa_supplicant configuration parser range checking"""
+    tests = [("eapol_version", 0, 4),
+             ("max_peer_links", -1, 256),
+             ("mesh_fwding", -1, 2),
+             ("auto_uuid", -1, 2),
+             ("device_name", 33*'A', None),
+             ("manufacturer", 65*'A', None),
+             ("model_name", 33*'A', None),
+             ("model_number", 33*'A', None),
+             ("serial_number", 33*'A', None),
+             ("wps_cred_processing", -1, 3),
+             ("wps_cred_add_sae", -1, 2),
+             ("p2p_go_intent", -1, 16),
+             ("persistent_reconnect", -1, 2),
+             ("p2p_intra_bss", -1, 2),
+             ("p2p_go_freq_change_policy", -1, 4),
+             ("p2p_passphrase_len", 7, 64),
+             ("p2p_add_cli_chan", -1, 2),
+             ("p2p_optimize_listen_chan", -1, 2),
+             ("p2p_go_ctwindow", -1, 128),
+             ("p2p_ignore_shared_freq", -1, 2),
+             ("p2p_cli_probe", -1, 2),
+             ("filter_ssids", -1, 2),
+             ("filter_rssi", -101, 1),
+             ("ap_isolate", -1, 2),
+             ("disassoc_low_ack", -1, 2),
+             ("hs20", -1, 2),
+             ("interworking", -1, 2),
+             ("access_network_type", -1, 16),
+             ("go_interworking", -1, 2),
+             ("go_access_network_type", -1, 16),
+             ("go_internet", -1, 2),
+             ("go_venue_group", -1, 256),
+             ("go_venue_type", -1, 256),
+             ("pbc_in_m1", -1, 2),
+             ("wps_nfc_dev_pw_id", 15, 65536),
+             ("auto_interworking", -1, 2),
+             ("sae_check_mfp", -1, 2),
+             ("sae_pwe", -1, 4),
+             ("sae_pmkid_in_assoc", -1, 2),
+             ("ignore_old_scan_res", -1, 2),
+             ("mac_addr", -1, 3),
+             ("preassoc_mac_addr", -1, 3),
+             ("fst_group_id", "", 129*"A"),
+             ("fst_priority", 0, 256),
+             ("fst_llt", 0, 2**32),
+             ("cert_in_cb", -1, 2),
+             ("wpa_rsc_relaxation", -1, 2),
+             ("mbo_cell_capa", 0, 4),
+             ("disassoc_imminent_rssi_threshold", -121, 1),
+             ("oce", -1, 4),
+             ("ftm_responder", -1, 2),
+             ("ftm_initiator", -1, 2),
+             ("gas_rand_mac_addr", -1, 3),
+             ("dpp_config_processing", -1, 3),
+             ("dpp_connector_privacy_default", -1, 2),
+             ("coloc_intf_reporting", -1, 2),
+             ("disable_btm", -1, 2),
+             ("extended_key_id", -1, 2),
+             ("wowlan_disconnect_on_deinit", -1, 2),
+             ("force_kdk_derivation", -1, 2),
+             ("pasn_corrupt_mic", -1, 2),
+             ("mld_force_single_link", -1, 2),
+             ("mld_connect_band_pref", -1, 5),
+             ("ft_prepend_pmkid", -1, 2)]
+    for name, value1, value2 in tests:
+        if "OK" in dev[0].request(f"SET {name} {value1}"):
+            raise Exception(f"Invalid SET command accepted: {name}={value1}")
+        if value2 is not None:
+            if "OK" in dev[0].request(f"SET {name} {value2}"):
+                raise Exception(f"Invalid SET command accepted: {name}={value2}")
+
+    id = dev[0].add_network()
+    tests = [("ssid", '"' + 33*"A" + '"', None),
+             ("scan_ssid", -1, 2),
+             ("ht", -1, 2),
+             ("vht", -1, 2),
+             ("he", -1, 2),
+             ("ht40", -2, 2),
+             ("max_oper_chwidth", -2, 10),
+             ("mode", -1, 6),
+             ("no_auto_peer", -1, 2),
+             ("mesh_fwding", -1, 2),
+             ("mesh_rssi_threshold", -256, 2),
+             ("proactive_key_caching", -2, 2),
+             ("disabled", -1, 3),
+             ("ieee80211w", -1, 3),
+             ("mixed_cell", -1, 2),
+             ("frequency", -1, 70201),
+             ("fixed_freq", -1, 2),
+             ("enable_edmg", -1, 2),
+             ("edmg_channel", 8, 14),
+             ("acs", -1, 2),
+             ("wpa_deny_ptk0_rekey", -1, 3),
+             ("ignore_broadcast_ssid", -1, 3),
+             ("disable_ht", -1, 2),
+             ("disable_ht40", -1, 2),
+             ("disable_sgi", -1, 2),
+             ("disable_ldpc", -1, 2),
+             ("ht40_intolerant", -1, 2),
+             ("tx_stbc", -2, 2),
+             ("rx_stbc", -2, 4),
+             ("disable_max_amsdu", -2, 2),
+             ("ampdu_factor", -2, 4),
+             ("ampdu_density", -2, 8),
+             ("disable_vht", -1, 2),
+             ("vht_rx_mcs_nss_1", -2, 4),
+             ("vht_rx_mcs_nss_2", -2, 4),
+             ("vht_rx_mcs_nss_3", -2, 4),
+             ("vht_rx_mcs_nss_4", -2, 4),
+             ("vht_rx_mcs_nss_5", -2, 4),
+             ("vht_rx_mcs_nss_6", -2, 4),
+             ("vht_rx_mcs_nss_7", -2, 4),
+             ("vht_rx_mcs_nss_8", -2, 4),
+             ("vht_tx_mcs_nss_1", -2, 4),
+             ("vht_tx_mcs_nss_2", -2, 4),
+             ("vht_tx_mcs_nss_3", -2, 4),
+             ("vht_tx_mcs_nss_4", -2, 4),
+             ("vht_tx_mcs_nss_5", -2, 4),
+             ("vht_tx_mcs_nss_6", -2, 4),
+             ("vht_tx_mcs_nss_7", -2, 4),
+             ("vht_tx_mcs_nss_8", -2, 4),
+             ("disable_he", -1, 2),
+             ("macsec_policy", -1, 2),
+             ("macsec_integ_only", -1, 2),
+             ("macsec_replay_protect", -1, 2),
+             ("macsec_offload", -1, 3),
+             ("macsec_port", -1, 65535),
+             ("mka_priority", -1, 256),
+             ("macsec_csindex", -1, 2),
+             ("roaming_consortium_selection", 16*"00", None),
+             ("mac_addr", -2, 4),
+             ("pbss", -1, 3),
+             ("wps_disabled", -1, 2),
+             ("fils_dh_group", -1, 65536),
+             ("dpp_pfs", -1, 3),
+             ("dpp_connector_privacy", -1, 2),
+             ("owe_group", -1, 65536),
+             ("owe_only", -1, 2),
+             ("owe_ptk_workaround", -1, 2),
+             ("multi_ap_backhaul_sta", -1, 2),
+             ("ft_eap_pmksa_caching", -1, 2),
+             ("beacon_prot", -1, 2),
+             ("transition_disable", -1, 256),
+             ("sae_pk", -1, 3),
+             ("disable_eht", -1, 2),
+             ("enable_4addr_mode", -1, 2)]
+    for name, value1, value2 in tests:
+        if "OK" in dev[0].request(f"SET_NETWORK {id} {name} {value1}"):
+            raise Exception(f"Invalid SET_NETWORK command accepted: {name}={value1}")
+        if value2 is not None:
+            if "OK" in dev[0].request(f"SET_NETWORK {id} {name} {value2}"):
+                raise Exception(f"Invalid SET_NETWORK command accepted: {name}={value2}")

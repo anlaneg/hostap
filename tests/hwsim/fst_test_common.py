@@ -24,13 +24,8 @@ fst_test_def_reg_domain = '00'
 
 class HapdRegCtrl:
     def __init__(self):
-        self.refcnt = 0
         self.ifname = None
         self.changed = False
-
-    def __del__(self):
-        if self.refcnt != 0 and self.changed == True:
-            self.restore_reg_domain()
 
     def start(self):
         if self.ifname != None:
@@ -90,8 +85,7 @@ class HapdRegCtrl:
 
 def fst_clear_regdom():
     cmd = subprocess.Popen(["iw", "reg", "get"], stdout=subprocess.PIPE)
-    res = cmd.stdout.read().decode()
-    cmd.stdout.close()
-    if "country 00:" not in res:
+    out, err = cmd.communicate()
+    if "country 00:" not in out.decode():
         subprocess.call(['iw', 'reg', 'set', '00'])
         time.sleep(0.1)
