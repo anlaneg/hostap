@@ -20,6 +20,7 @@
 #include "crypto/tls.h"
 #include "common/version.h"
 #include "common/dpp.h"
+#include "common/proc_coord.h"
 #include "drivers/driver.h"
 #include "eap_server/eap.h"
 #include "eap_server/tncs.h"
@@ -283,7 +284,7 @@ static int hostapd_driver_init(struct hostapd_iface *iface)
 				   &hapd->drv_priv, force_ifname, if_addr,
 				   params.num_bridge && params.bridge[0] ?
 				   params.bridge[0] : NULL,
-				   0)) {
+				   1)) {
 			wpa_printf(MSG_ERROR, "Failed to add BSS (BSSID="
 				   MACSTR ")", MAC2STR(hapd->own_addr));
 			os_free(params.bridge);
@@ -640,6 +641,9 @@ static void usage(void)
 		"\\\n"
 		"         [-g <global ctrl_iface>] [-G <group>]\\\n"
 		"         [-i <comma-separated list of interface names>]\\\n"
+#ifdef CONFIG_PROCESS_COORDINATION
+		"        [-z<process coordination directory>] \\\n"
+#endif /* CONFIG_PROCESS_COORDINATION */
 		"         <configuration file(s)>\n"
 		"\n"
 		"options:\n"
@@ -665,6 +669,9 @@ static void usage(void)
 		"   -S   start all the interfaces synchronously\n"
 		"   -t   include timestamps in some debug messages\n"
 		"   -v   show hostapd version\n"
+#ifdef CONFIG_PROCESS_COORDINATION
+		"   -z   process coordination directory\n"
+#endif /* CONFIG_PROCESS_COORDINATION */
 		"   -q   show less debug messages (-qq for even less)\n");
 
 	exit(1);
@@ -860,6 +867,7 @@ int main(int argc, char *argv[])
 #ifdef CONFIG_DPP
 	struct dpp_global_config dpp_conf;
 #endif /* CONFIG_DPP */
+	const char *proc_coord_dir = NULL;
 
 	//仅android有处理
 	if (os_program_init())
@@ -896,7 +904,7 @@ int main(int argc, char *argv[])
 #endif /* CONFIG_DPP */
 
 	for (;;) {
-		c = getopt(argc, argv, "b:Bde:f:hi:KP:sSTtu:vg:G:q");
+		c = getopt(argc, argv, "b:Bde:f:hi:KP:sSTtu:vg:G:qz:");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -982,6 +990,11 @@ int main(int argc, char *argv[])
 		case 'q':
 			wpa_debug_level++;
 			break;
+#ifdef CONFIG_PROCESS_COORDINATION
+		case 'z':
+			proc_coord_dir = optarg;
+			break;
+#endif /* CONFIG_PROCESS_COORDINATION */
 		default:
 			usage();
 			break;
@@ -1032,6 +1045,14 @@ int main(int argc, char *argv[])
 	//注册每HOSTAPD_CLEANUP_INTERVAL，做一次hostapd_periodic
 	eloop_register_timeout(HOSTAPD_CLEANUP_INTERVAL, 0,
 			       hostapd_periodic, &interfaces, NULL);
+
+#ifdef CONFIG_PROCESS_COORDINATION
+	if (proc_coord_dir) {
+		interfaces.pc = proc_coord_init(proc_coord_dir);
+		if (!interfaces.pc)
+			goto out;
+	}
+#endif /* CONFIG_PROCESS_COORDINATION */
 
 	if (fst_global_init()) {
 		wpa_printf(MSG_ERROR,
@@ -1149,6 +1170,10 @@ int main(int argc, char *argv[])
 #ifdef CONFIG_DPP
 	dpp_global_deinit(interfaces.dpp);
 #endif /* CONFIG_DPP */
+
+#ifdef CONFIG_PROCESS_COORDINATION
+	proc_coord_deinit(interfaces.pc);
+#endif /* CONFIG_PROCESS_COORDINATION */
 
 	if (interfaces.eloop_initialized)
 		eloop_cancel_timeout(hostapd_periodic, &interfaces, NULL);

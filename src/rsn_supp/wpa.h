@@ -105,6 +105,7 @@ struct wpa_sm_ctx {
 	void (*notify_pmksa_cache_entry)(void *ctx,
 					 struct rsn_pmksa_cache_entry *entry);
 	void (*ssid_verified)(void *ctx);
+	void (*sae_pw_id_change)(void *ctx, struct wpabuf_array *wa);
 };
 
 
@@ -141,6 +142,9 @@ enum wpa_sm_conf_params {
 	WPA_PARAM_RSN_OVERRIDE_SUPPORT,
 	WPA_PARAM_EAPOL_2_KEY_INFO_SET_MASK,
 	WPA_PARAM_SPP_AMSDU,
+	WPA_PARAM_URNM_MFPR,
+	WPA_PARAM_URNM_MFPR_X20,
+	WPA_PARAM_SAE_PW_ID_CHANGE,
 };
 
 enum wpa_rsn_override {
@@ -676,5 +680,7 @@ void wpa_sm_set_cur_pmksa(struct wpa_sm *sm,
 const u8 * wpa_sm_get_auth_addr(struct wpa_sm *sm);
 struct wpabuf * wpa_sm_known_sta_identification(struct wpa_sm *sm, const u8 *aa,
 						u64 timestamp);
+int wpa_sm_install_mlo_group_keys(struct wpa_sm *sm, const u8 *key_data,
+				  size_t key_data_len, u16 added_links_bitmap);
 
 #endif /* WPA_H */

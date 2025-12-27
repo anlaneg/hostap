@@ -72,7 +72,7 @@ mkconfig:
 		echo '.config exists - did not replace it'; \
 		exit 1; \
 	fi
-	echo CONFIG_DRIVER_HOSTAP=y >> .config
+	echo CONFIG_DRIVER_NL80211=y >> .config
 	echo CONFIG_DRIVER_WEXT=y >> .config
 
 $(DESTDIR)$(BINDIR)/%: %
@@ -276,9 +276,9 @@ CFLAGS += -DCONFIG_SAE
 OBJS += ../src/common/sae.o
 ifdef CONFIG_SAE_PK
 CFLAGS += -DCONFIG_SAE_PK
-NEED_AES_SIV=y
 OBJS += ../src/common/sae_pk.o
 endif
+NEED_AES_SIV=y
 NEED_ECC=y
 NEED_DH_GROUPS=y
 NEED_HMAC_SHA256_KDF=y
@@ -322,6 +322,12 @@ OBJS += ../src/common/nan_de.o
 OBJS += nan_usd.o
 NEED_OFFCHANNEL=y
 CFLAGS += -DCONFIG_NAN_USD
+endif
+
+ifdef CONFIG_PR
+OBJS += ../src/common/proximity_ranging.o
+OBJS += pr_supplicant.o
+CFLAGS += -DCONFIG_PR
 endif
 
 ifdef CONFIG_OWE
@@ -828,7 +834,9 @@ OBJS += ../src/eap_peer/eap_pwd.o ../src/eap_common/eap_pwd_common.o
 CONFIG_IEEE8021X_EAPOL=y
 NEED_ECC=y
 NEED_DRAGONFLY=y
+ifndef CONFIG_FIPS
 MS_FUNCS=y
+endif
 endif
 
 ifdef CONFIG_EAP_EKE
@@ -1908,6 +1916,11 @@ endif
 ifdef NEED_JSON
 OBJS += ../src/utils/json.o
 CFLAGS += -DCONFIG_JSON
+endif
+
+ifdef CONFIG_PROCESS_COORDINATION
+CFLAGS += -DCONFIG_PROCESS_COORDINATION
+OBJS += ../src/common/proc_coord.o
 endif
 
 ifdef CONFIG_MODULE_TESTS

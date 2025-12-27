@@ -2,7 +2,7 @@
  * hostapd / DPP integration
  * Copyright (c) 2017, Qualcomm Atheros, Inc.
  * Copyright (c) 2018-2020, The Linux Foundation
- * Copyright (c) 2021-2022, Qualcomm Innovation Center, Inc.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -2160,10 +2160,21 @@ static void hostapd_dpp_rx_peer_disc_req(struct hostapd_data *hapd,
 
 	if (wpa_auth_pmksa_add2(hapd->wpa_auth, src, intro.pmk, intro.pmk_len,
 				intro.pmkid, expiration,
-				WPA_KEY_MGMT_DPP, pkhash) < 0) {
+				WPA_KEY_MGMT_DPP, pkhash, false) < 0) {
 		wpa_printf(MSG_ERROR, "DPP: Failed to add PMKSA cache entry");
 		goto done;
 	}
+
+#ifdef CONFIG_IEEE80211BE
+	if (hapd->conf->mld_ap &&
+	    wpa_auth_pmksa_add2(hapd->wpa_auth, src, intro.pmk, intro.pmk_len,
+				intro.pmkid, expiration,
+				WPA_KEY_MGMT_DPP, pkhash, true) < 0) {
+		wpa_printf(MSG_ERROR,
+			   "DPP: Failed to add PMKSA cache entry (MLD)");
+		goto done;
+	}
+#endif /* CONFIG_IEEE80211BE */
 
 	hostapd_dpp_send_peer_disc_resp(hapd, src, freq, trans_id[0],
 					DPP_STATUS_OK);
@@ -2934,10 +2945,21 @@ hostapd_dpp_rx_priv_peer_intro_update(struct hostapd_data *hapd, const u8 *src,
 
 	if (wpa_auth_pmksa_add2(hapd->wpa_auth, src, intro.pmk, intro.pmk_len,
 				intro.pmkid, expiration,
-				WPA_KEY_MGMT_DPP, pkhash) < 0) {
+				WPA_KEY_MGMT_DPP, pkhash, false) < 0) {
 		wpa_printf(MSG_ERROR, "DPP: Failed to add PMKSA cache entry");
 		goto done;
 	}
+
+#ifdef CONFIG_IEEE80211BE
+	if (hapd->conf->mld_ap &&
+	    wpa_auth_pmksa_add2(hapd->wpa_auth, src, intro.pmk, intro.pmk_len,
+				intro.pmkid, expiration,
+				WPA_KEY_MGMT_DPP, pkhash, true) < 0) {
+		wpa_printf(MSG_ERROR,
+			   "DPP: Failed to add PMKSA cache entry (MLD)");
+		goto done;
+	}
+#endif /* CONFIG_IEEE80211BE */
 
 	wpa_printf(MSG_DEBUG, "DPP: Private Peer Introduction completed with "
 		   MACSTR, MAC2STR(src));

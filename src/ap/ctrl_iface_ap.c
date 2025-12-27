@@ -11,6 +11,7 @@
 #include "utils/common.h"
 #include "common/ieee802_11_defs.h"
 #include "common/sae.h"
+#include "common/hw_features_common.h"
 #include "eapol_auth/eapol_auth_sm.h"
 #include "fst/fst_ctrl_iface.h"
 #include "hostapd.h"
@@ -1049,16 +1050,16 @@ int hostapd_ctrl_iface_status(struct hostapd_data *hapd, char *buf,
 						   mode->mcs_set);
 	}
 
-	if (iface->current_rates && iface->num_rates) {
+	if (hapd->current_rates && hapd->num_rates) {
 		ret = os_snprintf(buf + len, buflen - len, "supported_rates=");
 		if (os_snprintf_error(buflen - len, ret))
 			return len;
 		len += ret;
 
-		for (j = 0; j < iface->num_rates; j++) {
+		for (j = 0; j < hapd->num_rates; j++) {
 			ret = os_snprintf(buf + len, buflen - len, "%s%02x",
 					  j > 0 ? " " : "",
-					  iface->current_rates[j].rate / 5);
+					  hapd->current_rates[j].rate / 5);
 			if (os_snprintf_error(buflen - len, ret))
 				return len;
 			len += ret;
@@ -1127,10 +1128,295 @@ int hostapd_ctrl_iface_status(struct hostapd_data *hapd, char *buf,
 }
 
 
-int hostapd_parse_csa_settings(const char *pos,
+int hostapd_parse_freq_params(const char *pos,
+			      struct hostapd_freq_params *params,
+			      unsigned int freq)
+{
+	os_memset(params, 0, sizeof(*params));
+
+	if (freq)
+		params->freq = freq;
+	else
+		params->freq = atoi(pos);
+
+	if (params->freq == 0) {
+		wpa_printf(MSG_ERROR, "freq_params: invalid freq provided");
+		return -1;
+	}
+
+#define SET_FREQ_PARAM(str) \
+	do { \
+		const char *pos2 = os_strstr(pos, " " #str "="); \
+		if (pos2) { \
+			pos2 += sizeof(" " #str "=") - 1; \
+			params->str = atoi(pos2); \
+		} \
+	} while (0)
+
+	SET_FREQ_PARAM(center_freq1);
+	SET_FREQ_PARAM(center_freq2);
+	SET_FREQ_PARAM(bandwidth);
+	SET_FREQ_PARAM(sec_channel_offset);
+	SET_FREQ_PARAM(punct_bitmap);
+	params->ht_enabled = !!os_strstr(pos, " ht");
+	params->vht_enabled = !!os_strstr(pos, " vht");
+	params->eht_enabled = !!os_strstr(pos, " eht");
+	params->he_enabled = !!os_strstr(pos, " he") ||
+		params->eht_enabled;
+#undef SET_FREQ_PARAM
+
+	return 0;
+}
+
+
+static struct hostapd_hw_modes * get_target_hw_mode(struct hostapd_iface *iface,
+						    int freq)
+{
+	int i;
+	enum hostapd_hw_mode target_mode;
+	bool is_6ghz = is_6ghz_freq(freq);
+
+	if (freq < 4000)
+		target_mode = HOSTAPD_MODE_IEEE80211G;
+	else if (freq > 50000)
+		target_mode = HOSTAPD_MODE_IEEE80211AD;
+	else
+		target_mode = HOSTAPD_MODE_IEEE80211A;
+
+	for (i = 0; i < iface->num_hw_features; i++) {
+		struct hostapd_hw_modes *mode;
+
+		mode = &iface->hw_features[i];
+		if (mode->mode == target_mode && mode->is_6ghz == is_6ghz)
+			return mode;
+	}
+
+	return NULL;
+}
+
+
+static bool
+hostapd_ctrl_is_freq_in_mode(struct hostapd_hw_modes *mode,
+			     struct hostapd_multi_hw_info *current_hw_info,
+			     int freq)
+{
+	struct hostapd_channel_data *chan;
+	int i;
+
+	for (i = 0; i < mode->num_channels; i++) {
+		chan = &mode->channels[i];
+
+		if (chan->flag & HOSTAPD_CHAN_DISABLED)
+			continue;
+
+		if (!chan_in_current_hw_info(current_hw_info, chan))
+			continue;
+
+		if (chan->freq == freq)
+			return true;
+	}
+	return false;
+}
+
+
+static int hostapd_ctrl_check_freq_params(struct hostapd_freq_params *params,
+					  u16 punct_bitmap)
+{
+	u32 start_freq;
+
+	if (is_6ghz_freq(params->freq)) {
+		const int bw_idx[] = { 20, 40, 80, 160, 320 };
+		int idx, bw;
+
+		/* The 6 GHz band requires HE to be enabled. */
+		params->he_enabled = 1;
+
+		if (params->center_freq1) {
+			if (params->freq == 5935)
+				idx = (params->center_freq1 - 5925) / 5;
+			else
+				idx = (params->center_freq1 - 5950) / 5;
+
+			bw = center_idx_to_bw_6ghz(idx);
+			if (bw < 0 || bw >= (int) ARRAY_SIZE(bw_idx) ||
+			    bw_idx[bw] != params->bandwidth)
+				return -1;
+		}
+	} else { /* Non-6 GHz channel */
+		/* An EHT STA is also an HE STA as defined in
+		 * IEEE Std 802.11be-2024, 4.3.16a (Extremely high throughput
+		 * (EHT) STA). */
+		if (params->he_enabled || params->eht_enabled) {
+			params->he_enabled = 1;
+			/* An HE STA is also a VHT STA if operating in the 5 GHz
+			 * band and an HE STA is also an HT STA in the 2.4 GHz
+			 * band as defined in IEEE Std 802.11ax-2021, 4.3.15a.
+			 * A VHT STA is an HT STA as defined in IEEE
+			 * Std 802.11, 4.3.15. */
+			if (IS_5GHZ(params->freq))
+				params->vht_enabled = 1;
+
+			params->ht_enabled = 1;
+		}
+	}
+
+	switch (params->bandwidth) {
+	case 0:
+		/* bandwidth not specified: use 20 MHz by default */
+		/* fall-through */
+	case 20:
+		if (params->center_freq1 &&
+		    params->center_freq1 != params->freq)
+			return -1;
+
+		if (params->center_freq2 || params->sec_channel_offset)
+			return -1;
+
+		if (punct_bitmap)
+			return -1;
+		break;
+	case 40:
+		if (params->center_freq2 || !params->sec_channel_offset)
+			return -1;
+
+		if (punct_bitmap)
+			return -1;
+
+		if (!params->center_freq1)
+			break;
+		switch (params->sec_channel_offset) {
+		case 1:
+			if (params->freq + 10 != params->center_freq1)
+				return -1;
+			break;
+		case -1:
+			if (params->freq - 10 != params->center_freq1)
+				return -1;
+			break;
+		default:
+			return -1;
+		}
+		break;
+	case 80:
+		if (!params->center_freq1 || !params->sec_channel_offset)
+			return 1;
+
+		switch (params->sec_channel_offset) {
+		case 1:
+			if (params->freq - 10 != params->center_freq1 &&
+			    params->freq + 30 != params->center_freq1)
+				return 1;
+			break;
+		case -1:
+			if (params->freq + 10 != params->center_freq1 &&
+			    params->freq - 30 != params->center_freq1)
+				return -1;
+			break;
+		default:
+			return -1;
+		}
+
+		if (params->center_freq2 && punct_bitmap)
+			return -1;
+
+		/* Adjacent and overlapped are not allowed for 80+80 */
+		if (params->center_freq2 &&
+		    params->center_freq1 - params->center_freq2 <= 80 &&
+		    params->center_freq2 - params->center_freq1 <= 80)
+			return 1;
+		break;
+	case 160:
+		if (!params->center_freq1 || params->center_freq2 ||
+		    !params->sec_channel_offset)
+			return -1;
+
+		switch (params->sec_channel_offset) {
+		case 1:
+			if (params->freq + 70 != params->center_freq1 &&
+			    params->freq + 30 != params->center_freq1 &&
+			    params->freq - 10 != params->center_freq1 &&
+			    params->freq - 50 != params->center_freq1)
+				return -1;
+			break;
+		case -1:
+			if (params->freq + 50 != params->center_freq1 &&
+			    params->freq + 10 != params->center_freq1 &&
+			    params->freq - 30 != params->center_freq1 &&
+			    params->freq - 70 != params->center_freq1)
+				return -1;
+			break;
+		default:
+			return -1;
+		}
+		break;
+	case 320:
+		if (!params->center_freq1 || params->center_freq2 ||
+		    !params->sec_channel_offset)
+			return -1;
+
+		switch (params->sec_channel_offset) {
+		case 1:
+			if (params->freq + 150 != params->center_freq1 &&
+			    params->freq + 110 != params->center_freq1 &&
+			    params->freq + 70 != params->center_freq1 &&
+			    params->freq + 30 != params->center_freq1 &&
+			    params->freq - 10 != params->center_freq1 &&
+			    params->freq - 50 != params->center_freq1 &&
+			    params->freq - 90 != params->center_freq1 &&
+			    params->freq - 130 != params->center_freq1)
+				return -1;
+			break;
+		case -1:
+			if (params->freq + 130 != params->center_freq1 &&
+			    params->freq + 90 != params->center_freq1 &&
+			    params->freq + 50 != params->center_freq1 &&
+			    params->freq + 10 != params->center_freq1 &&
+			    params->freq - 30 != params->center_freq1 &&
+			    params->freq - 70 != params->center_freq1 &&
+			    params->freq - 110 != params->center_freq1 &&
+			    params->freq - 150 != params->center_freq1)
+				return -1;
+			break;
+		}
+		break;
+	default:
+		return -1;
+	}
+
+	if (!punct_bitmap)
+		return 0;
+
+	if (!params->eht_enabled) {
+		wpa_printf(MSG_ERROR,
+			   "Preamble puncturing supported only in EHT");
+		return -1;
+	}
+
+	if (params->freq >= 2412 && params->freq <= 2484) {
+		wpa_printf(MSG_ERROR,
+			   "Preamble puncturing is not supported in 2.4 GHz");
+		return -1;
+	}
+
+	start_freq = params->center_freq1 - (params->bandwidth / 2);
+	if (!is_punct_bitmap_valid(params->bandwidth,
+				   (params->freq - start_freq) / 20,
+				   punct_bitmap)) {
+		wpa_printf(MSG_ERROR, "Invalid preamble puncturing bitmap");
+		return -1;
+	}
+
+	return 0;
+}
+
+
+int hostapd_parse_csa_settings(struct hostapd_iface *iface,
+			       const char *pos,
 			       struct csa_settings *settings)
 {
+	struct hostapd_hw_modes *target_mode;
 	char *end;
+	int ret;
 
 	os_memset(settings, 0, sizeof(*settings));
 	settings->cs_count = strtol(pos, &end, 10);
@@ -1139,33 +1425,37 @@ int hostapd_parse_csa_settings(const char *pos,
 		return -1;
 	}
 
-	settings->freq_params.freq = atoi(end);
-	if (settings->freq_params.freq == 0) {
-		wpa_printf(MSG_ERROR, "chanswitch: invalid freq provided");
+	settings->block_tx = !!os_strstr(pos, " blocktx");
+
+	ret = hostapd_parse_freq_params(end, &settings->freq_params, 0);
+	if (ret < 0) {
+		wpa_printf(MSG_INFO,
+				"chanswitch: failed to parse frequency parameters");
+		return ret;
+	}
+
+	target_mode = get_target_hw_mode(iface, settings->freq_params.freq);
+	if (!target_mode) {
+		wpa_printf(MSG_DEBUG,
+			   "chanswitch: Invalid frequency settings provided for hw mode");
 		return -1;
 	}
 
-#define SET_CSA_SETTING(str) \
-	do { \
-		const char *pos2 = os_strstr(pos, " " #str "="); \
-		if (pos2) { \
-			pos2 += sizeof(" " #str "=") - 1; \
-			settings->freq_params.str = atoi(pos2); \
-		} \
-	} while (0)
+	if (iface->num_hw_features > 1 &&
+	    !hostapd_ctrl_is_freq_in_mode(target_mode, iface->current_hw_info,
+					  settings->freq_params.freq)) {
+		wpa_printf(MSG_INFO,
+			   "chanswitch: Invalid frequency settings provided for multi band phy");
+		return -1;
+	}
 
-	SET_CSA_SETTING(center_freq1);
-	SET_CSA_SETTING(center_freq2);
-	SET_CSA_SETTING(bandwidth);
-	SET_CSA_SETTING(sec_channel_offset);
-	SET_CSA_SETTING(punct_bitmap);
-	settings->freq_params.ht_enabled = !!os_strstr(pos, " ht");
-	settings->freq_params.vht_enabled = !!os_strstr(pos, " vht");
-	settings->freq_params.eht_enabled = !!os_strstr(pos, " eht");
-	settings->freq_params.he_enabled = !!os_strstr(pos, " he") ||
-		settings->freq_params.eht_enabled;
-	settings->block_tx = !!os_strstr(pos, " blocktx");
-#undef SET_CSA_SETTING
+	ret = hostapd_ctrl_check_freq_params(&settings->freq_params,
+					     settings->freq_params.punct_bitmap);
+	if (ret) {
+		wpa_printf(MSG_INFO,
+			   "chanswitch: invalid frequency settings provided");
+		return ret;
+	}
 
 	return 0;
 }
@@ -1198,6 +1488,7 @@ int hostapd_ctrl_iface_pmksa_add(struct hostapd_data *hapd, char *cmd)
 	size_t pmk_len;
 	char *pos, *pos2;
 	int akmp = 0, expiration = 0;
+	int ret;
 
 	/*
 	 * Entry format:
@@ -1233,8 +1524,18 @@ int hostapd_ctrl_iface_pmksa_add(struct hostapd_data *hapd, char *cmd)
 	if (sscanf(pos, "%d %d", &expiration, &akmp) != 2)
 		return -1;
 
-	return wpa_auth_pmksa_add2(hapd->wpa_auth, spa, pmk, pmk_len,
-				   pmkid, expiration, akmp, NULL);
+	ret = wpa_auth_pmksa_add2(hapd->wpa_auth, spa, pmk, pmk_len,
+				  pmkid, expiration, akmp, NULL, false);
+	if (ret)
+		return ret;
+
+#ifdef CONFIG_IEEE80211BE
+	if (hapd->conf->mld_ap)
+		ret = wpa_auth_pmksa_add2(hapd->wpa_auth, spa, pmk, pmk_len,
+					  pmkid, expiration, akmp, NULL, true);
+#endif /* CONFIG_IEEE80211BE */
+
+	return ret;
 }
 
 
@@ -1633,6 +1934,11 @@ int hostapd_disassoc_deny_mac(struct hostapd_data *hapd)
 	struct vlan_description vlan_id;
 
 	for (sta = hapd->sta_list; sta; sta = sta->next) {
+#ifdef CONFIG_IEEE80211BE
+		int link_id;
+		struct mld_link_info *info;
+#endif /* CONFIG_IEEE80211BE */
+
 		if (hostapd_maclist_found(hapd->conf->deny_mac,
 					  hapd->conf->num_deny_mac, sta->addr,
 					  &vlan_id) &&
@@ -1640,6 +1946,24 @@ int hostapd_disassoc_deny_mac(struct hostapd_data *hapd)
 		     !vlan_compare(&vlan_id, sta->vlan_desc)))
 			ap_sta_disconnect(hapd, sta, sta->addr,
 					  WLAN_REASON_UNSPECIFIED);
+#ifdef CONFIG_IEEE80211BE
+		for (link_id = 0; hapd->conf->mld_ap &&
+			     link_id < MAX_NUM_MLD_LINKS &&
+			     sta->mld_info.mld_sta; link_id++) {
+			info = &sta->mld_info.links[link_id];
+			if (!info->valid || link_id != hapd->mld_link_id)
+				continue;
+
+			if (hostapd_maclist_found(hapd->conf->deny_mac,
+						  hapd->conf->num_deny_mac,
+						  info->peer_addr,
+						  &vlan_id) &&
+			    (!vlan_id.notempty ||
+			     !vlan_compare(&vlan_id, sta->vlan_desc)))
+				ap_sta_disconnect(hapd, sta, sta->addr,
+						  WLAN_REASON_UNSPECIFIED);
+		}
+#endif /* CONFIG_IEEE80211BE */
 	}
 
 	return 0;

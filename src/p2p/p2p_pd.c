@@ -1643,6 +1643,7 @@ static void p2p_process_prov_disc_bootstrap_resp(struct p2p_data *p2p,
 	size_t cookie_len = 0;
 	const u8 *pos, *cookie;
 	u16 comeback_after;
+	u16 bootstrap = 0;
 
 	/* Parse the P2P status present */
 	if (msg->status)
@@ -1693,6 +1694,12 @@ static void p2p_process_prov_disc_bootstrap_resp(struct p2p_data *p2p,
 			p2p_dbg(p2p, "Truncated PBMA");
 			return;
 		}
+
+		if (cookie_len > sizeof(dev->bootstrap_params->cookie)) {
+			p2p_dbg(p2p, "Too long PBMA cookie");
+			return;
+		}
+
 		cookie = pos;
 
 		dev->bootstrap_params =
@@ -1709,16 +1716,47 @@ static void p2p_process_prov_disc_bootstrap_resp(struct p2p_data *p2p,
 		p2p->cfg->register_bootstrap_comeback(p2p->cfg->cb_ctx, sa,
 						      comeback_after);
 		p2p->cfg->send_action_done(p2p->cfg->cb_ctx);
+
+		if (p2p->cfg->bootstrap_rsp_rx)
+			p2p->cfg->bootstrap_rsp_rx(p2p->cfg->cb_ctx, sa, status,
+						   rx_freq,
+						   dev->req_bootstrap_method);
 		return;
 	}
+
+	/* PBMA response */
+	if (msg->pbma_info_len >= 2)
+		bootstrap = WPA_GET_LE16(msg->pbma_info);
+
+	/* Overwrite the status if bootstrap method does not match */
+	if (status == P2P_SC_SUCCESS &&
+	    !(bootstrap == P2P_PBMA_PIN_CODE_DISPLAY &&
+	      dev->req_bootstrap_method == P2P_PBMA_PIN_CODE_KEYPAD) &&
+	    !(bootstrap == P2P_PBMA_PIN_CODE_KEYPAD &&
+	      dev->req_bootstrap_method == P2P_PBMA_PIN_CODE_DISPLAY) &&
+	    !(bootstrap == P2P_PBMA_PASSPHRASE_DISPLAY &&
+	      dev->req_bootstrap_method == P2P_PBMA_PASSPHRASE_KEYPAD) &&
+	    !(bootstrap == P2P_PBMA_PASSPHRASE_KEYPAD &&
+	      dev->req_bootstrap_method == P2P_PBMA_PASSPHRASE_DISPLAY) &&
+	    !(bootstrap == P2P_PBMA_NFC_TAG &&
+	      dev->req_bootstrap_method == P2P_PBMA_NFC_READER) &&
+	    !(bootstrap == P2P_PBMA_NFC_READER &&
+	      dev->req_bootstrap_method == P2P_PBMA_NFC_TAG) &&
+	    !(bootstrap == P2P_PBMA_QR_DISPLAY &&
+	      dev->req_bootstrap_method == P2P_PBMA_QR_SCAN) &&
+	    !(bootstrap == P2P_PBMA_QR_SCAN &&
+	      dev->req_bootstrap_method == P2P_PBMA_QR_DISPLAY) &&
+	    !(bootstrap == P2P_PBMA_OPPORTUNISTIC &&
+	      dev->req_bootstrap_method == P2P_PBMA_OPPORTUNISTIC))
+		status = P2P_SC_FAIL_INVALID_PARAMS;
 
 	p2p->cfg->send_action_done(p2p->cfg->cb_ctx);
 	if (dev->flags & P2P_DEV_PD_BEFORE_GO_NEG)
 		dev->flags &= ~P2P_DEV_PD_BEFORE_GO_NEG;
 
-	if (p2p->cfg->bootstrap_completed)
-		p2p->cfg->bootstrap_completed(p2p->cfg->cb_ctx, sa, status,
-					      rx_freq);
+	if (p2p->cfg->bootstrap_rsp_rx)
+		p2p->cfg->bootstrap_rsp_rx(p2p->cfg->cb_ctx, sa, status,
+					   rx_freq, dev->req_bootstrap_method);
 }
 
 

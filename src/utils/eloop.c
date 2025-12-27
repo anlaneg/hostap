@@ -718,6 +718,7 @@ static void eloop_sock_table_destroy(struct eloop_sock_table *table)
 						table->table[i].handler);
 			wpa_trace_dump("eloop sock", &table->table[i]);
 		}
+		eloop_trace_sock_remove_ref(table);
 		os_free(table->table);
 	}
 }
@@ -991,6 +992,9 @@ static void eloop_handle_alarm(int sig)
 		   "is a bug that ends up in a busy loop that "
 		   "prevents clean shutdown.\n"
 		   "Killing program forcefully.\n");
+#ifdef WPA_TRACE
+	wpa_trace_show("eloop: could not process SIGINT or SIGTERM in two seconds");
+#endif /* WPA_TRACE */
 	exit(1);
 }
 #endif /* CONFIG_NATIVE_WINDOWS */

@@ -83,6 +83,7 @@ struct wiphy_info_data {
 	unsigned int update_ft_ies_supported:1;
 	unsigned int has_key_mgmt:1;
 	unsigned int has_key_mgmt_iftype:1;
+	unsigned int support_ap_scan:1;
 };
 
 
@@ -748,8 +749,10 @@ static void wiphy_info_feature_flags(struct wiphy_info_data *info,
 	if (flags & NL80211_FEATURE_NEED_OBSS_SCAN)
 		capa->flags |= WPA_DRIVER_FLAGS_OBSS_SCAN;
 
-	if (flags & NL80211_FEATURE_AP_MODE_CHAN_WIDTH_CHANGE)
+	if (flags & NL80211_FEATURE_AP_MODE_CHAN_WIDTH_CHANGE) {
 		capa->flags |= WPA_DRIVER_FLAGS_HT_2040_COEX;
+		capa->flags2 |= WPA_DRIVER_FLAGS2_AP_CHANWIDTH_CHANGE;
+	}
 
 	if (flags & NL80211_FEATURE_TDLS_CHANNEL_SWITCH) {
 		wpa_printf(MSG_DEBUG, "nl80211: TDLS channel switch");
@@ -788,6 +791,9 @@ static void wiphy_info_feature_flags(struct wiphy_info_data *info,
 
 	if (flags & NL80211_FEATURE_FULL_AP_CLIENT_STATE)
 		capa->flags |= WPA_DRIVER_FLAGS_FULL_AP_CLIENT_STATE;
+
+	if (flags & NL80211_FEATURE_AP_SCAN)
+		info->support_ap_scan = 1;
 }
 
 
@@ -1464,6 +1470,12 @@ static void qca_nl80211_get_features(struct wpa_driver_nl80211_data *drv)
 	if (check_feature(QCA_WLAN_VENDOR_FEATURE_NAN_USD_OFFLOAD, &info))
 		drv->capa.flags2 |= WPA_DRIVER_FLAGS2_NAN_OFFLOAD;
 
+	if (check_feature(QCA_WLAN_VENDOR_FEATURE_P2P_V2, &info))
+		drv->capa.flags2 |= WPA_DRIVER_FLAGS2_P2P_FEATURE_V2;
+
+	if (check_feature(QCA_WLAN_VENDOR_FEATURE_PCC_MODE, &info))
+		drv->capa.flags2 |= WPA_DRIVER_FLAGS2_P2P_FEATURE_PCC_MODE;
+
 	os_free(info.flags);
 }
 
@@ -1576,6 +1588,7 @@ int wpa_driver_nl80211_capa(struct wpa_driver_nl80211_data *drv)
 	if (info.set_qos_map_supported)
 		drv->capa.flags |= WPA_DRIVER_FLAGS_QOS_MAPPING;
 	drv->have_low_prio_scan = info.have_low_prio_scan;
+	drv->support_ap_scan = info.support_ap_scan;
 
 	/*
 	 * If the driver doesn't support data TX status, we won't get TX
@@ -1583,6 +1596,14 @@ int wpa_driver_nl80211_capa(struct wpa_driver_nl80211_data *drv)
 	 */
 	if (!info.data_tx_status)
 		drv->capa.flags &= ~WPA_DRIVER_FLAGS_EAPOL_TX_STATUS;
+
+	/* Enable P2P2 and PCC mode capabilities by default for the drivers
+	 * for which SME runs in wpa_supplicant
+	 */
+	if (drv->capa.flags & WPA_DRIVER_FLAGS_SME) {
+		drv->capa.flags2 |= WPA_DRIVER_FLAGS2_P2P_FEATURE_V2;
+		drv->capa.flags2 |= WPA_DRIVER_FLAGS2_P2P_FEATURE_PCC_MODE;
+	}
 
 #ifdef CONFIG_DRIVER_NL80211_QCA
 	if (!(info.capa->flags & WPA_DRIVER_FLAGS_DFS_OFFLOAD))
@@ -2377,7 +2398,7 @@ static void nl80211_reg_rule_sec(struct nlattr *tb[],
 
 
 static void nl80211_set_vht_mode(struct hostapd_hw_modes *mode, int start,
-				 int end, int max_bw)
+				 int end, int max_bw, u32 flags)
 {
 	int c;
 
@@ -2392,6 +2413,9 @@ static void nl80211_set_vht_mode(struct hostapd_hw_modes *mode, int start,
 
 		if (max_bw >= 160)
 			chan->flag |= HOSTAPD_CHAN_VHT_160MHZ_SUBCHANNEL;
+
+		if (flags & NL80211_RRF_AUTO_BW)
+			chan->flag |= HOSTAPD_CHAN_AUTO_BW;
 	}
 }
 
@@ -2399,7 +2423,7 @@ static void nl80211_set_vht_mode(struct hostapd_hw_modes *mode, int start,
 static void nl80211_reg_rule_vht(struct nlattr *tb[],
 				 struct phy_info_arg *results)
 {
-	u32 start, end, max_bw;
+	u32 start, end, max_bw, flags = 0;
 	u16 m;
 
 	if (tb[NL80211_ATTR_FREQ_RANGE_START] == NULL ||
@@ -2410,6 +2434,9 @@ static void nl80211_reg_rule_vht(struct nlattr *tb[],
 	start = nla_get_u32(tb[NL80211_ATTR_FREQ_RANGE_START]) / 1000;
 	end = nla_get_u32(tb[NL80211_ATTR_FREQ_RANGE_END]) / 1000;
 	max_bw = nla_get_u32(tb[NL80211_ATTR_FREQ_RANGE_MAX_BW]) / 1000;
+
+	if (tb[NL80211_ATTR_REG_RULE_FLAGS])
+		flags = nla_get_u32(tb[NL80211_ATTR_REG_RULE_FLAGS]);
 
 	if (max_bw < 80)
 		return;
@@ -2422,7 +2449,8 @@ static void nl80211_reg_rule_vht(struct nlattr *tb[],
 		if (!results->modes[m].vht_capab)
 			continue;
 
-		nl80211_set_vht_mode(&results->modes[m], start, end, max_bw);
+		nl80211_set_vht_mode(&results->modes[m], start, end,
+				     max_bw, flags);
 	}
 }
 

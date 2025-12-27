@@ -178,6 +178,8 @@ void hostapd_config_defaults_bss(struct hostapd_bss_config *bss)
 	bss->pasn_comeback_after = 10;
 	bss->pasn_noauth = 1;
 #endif /* CONFIG_PASN */
+	bss->urnm_mfpr_x20 = -1;
+	bss->urnm_mfpr = -1;
 }
 
 
@@ -524,7 +526,7 @@ int hostapd_setup_sae_pt(struct hostapd_bss_config *conf)
 		ssid->pt = sae_derive_pt(groups, ssid->ssid, ssid->ssid_len,
 					 (const u8 *) ssid->wpa_passphrase,
 					 os_strlen(ssid->wpa_passphrase),
-					 NULL);
+					 NULL, 0);
 		if (!ssid->pt)
 			return -1;
 	}
@@ -534,7 +536,9 @@ int hostapd_setup_sae_pt(struct hostapd_bss_config *conf)
 		pw->pt = sae_derive_pt(groups, ssid->ssid, ssid->ssid_len,
 				       (const u8 *) pw->password,
 				       os_strlen(pw->password),
-				       pw->identifier);
+				       (const u8 *) pw->identifier,
+				       pw->identifier ?
+				       os_strlen(pw->identifier) : 0);
 		if (!pw->pt)
 			return -1;
 	}
@@ -883,6 +887,8 @@ void hostapd_config_free_bss(struct hostapd_bss_config *conf)
 	os_free(conf->radius_das_shared_secret);
 	hostapd_config_free_vlan(conf);
 	os_free(conf->time_zone);
+	os_free(conf->supported_rates);
+	os_free(conf->basic_rates);
 
 #ifdef CONFIG_IEEE80211R_AP
 	hostapd_config_clear_rxkhs(conf);
@@ -1008,6 +1014,8 @@ void hostapd_config_free_bss(struct hostapd_bss_config *conf)
 	os_free(conf->pasn_groups);
 #endif /* CONFIG_PASN */
 
+	wpabuf_clear_free(conf->sae_pw_id_key);
+
 	os_free(conf);
 }
 
@@ -1026,8 +1034,6 @@ void hostapd_config_free(struct hostapd_config *conf)
 	for (i = 0; i < conf->num_bss; i++)
 		hostapd_config_free_bss(conf->bss[i]);
 	os_free(conf->bss);
-	os_free(conf->supported_rates);
-	os_free(conf->basic_rates);
 	os_free(conf->acs_ch_list.range);
 	os_free(conf->acs_freq_list.range);
 	os_free(conf->driver_params);
@@ -1072,21 +1078,6 @@ int hostapd_maclist_found(struct mac_acl_entry *list, int num_entries,
 		else
 			end = middle - 1;
 	}
-
-	return 0;
-}
-
-
-int hostapd_rate_found(int *list, int rate)
-{
-	int i;
-
-	if (list == NULL)
-		return 0;
-
-	for (i = 0; list[i] >= 0; i++)
-		if (list[i] == rate)
-			return 1;
 
 	return 0;
 }
@@ -1202,7 +1193,7 @@ static bool hostapd_sae_pk_password_without_pk(struct hostapd_bss_config *bss)
 #endif /* CONFIG_SAE_PK */
 
 
-static bool hostapd_config_check_bss_6g(struct hostapd_bss_config *bss)
+bool hostapd_config_check_bss_6g(struct hostapd_bss_config *bss)
 {
 	if (bss->wpa != WPA_PROTO_RSN) {
 		wpa_printf(MSG_ERROR,
@@ -1489,6 +1480,7 @@ static int hostapd_config_check_bss(struct hostapd_bss_config *bss,
 #ifdef CONFIG_IEEE80211BE
 	if (full_config && !bss->disable_11be && bss->disable_11ax) {
 		bss->disable_11be = true;
+		bss->mld_ap = 0;
 		wpa_printf(MSG_INFO,
 			   "Disabling IEEE 802.11be as IEEE 802.11ax is disabled for this BSS");
 	}
@@ -1498,6 +1490,12 @@ static int hostapd_config_check_bss(struct hostapd_bss_config *bss,
 		bss->beacon_prot = 1;
 		wpa_printf(MSG_INFO,
 			   "Enabling beacon protection as IEEE 802.11be is enabled for this BSS");
+	}
+
+	if ((!conf->ieee80211be || bss->disable_11be) && bss->mld_ap) {
+		wpa_printf(MSG_INFO,
+			   "Cannot enable mld_ap when IEEE 802.11be is disabled");
+		return -1;
 	}
 #endif /* CONFIG_IEEE80211BE */
 

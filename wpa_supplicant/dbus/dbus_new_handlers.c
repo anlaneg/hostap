@@ -4672,7 +4672,7 @@ dbus_bool_t wpas_dbus_setter_iface_global(
 		return FALSE;
 	}
 
-	ret = wpa_config_process_global(wpa_s->conf, buf, -1);
+	ret = wpa_config_process_global(wpa_s->conf, buf, -1, false);
 	if (ret < 0) {
 		dbus_set_error(error, DBUS_ERROR_INVALID_ARGS,
 			       "Failed to set interface property %s",
@@ -5801,7 +5801,6 @@ dbus_bool_t wpas_dbus_getter_bss_anqp(
 	struct bss_handler_args *args = user_data;
 	struct wpa_bss *bss;
 	struct wpa_bss_anqp *anqp;
-	struct wpa_bss_anqp_elem *elem;
 
 	bss = get_bss_helper(args, error, __func__);
 	if (!bss)
@@ -5815,6 +5814,8 @@ dbus_bool_t wpas_dbus_getter_bss_anqp(
 	anqp = bss->anqp;
 	if (anqp) {
 #ifdef CONFIG_INTERWORKING
+		struct wpa_bss_anqp_elem *elem;
+
 		if (anqp->capability_list &&
 		    !wpa_dbus_dict_append_byte_array(
 			    &iter_dict, "CapabilityList",
@@ -6737,6 +6738,39 @@ fail:
 
 
 /*
+ * wpas_dbus_handler_nan_publish_stop_listen - Stop listen for a NAN publish
+ * @message: Pointer to incoming dbus message
+ * @wpa_s: wpa_supplicant structure for a network interface
+ * Returns: NULL indicating success or DBus error message on failure
+ *
+ * Handler function for "NANPublishStopListen" method call of network interface.
+ */
+DBusMessage *
+wpas_dbus_handler_nan_publish_stop_listen(DBusMessage *message,
+					  struct wpa_supplicant *wpa_s)
+{
+	dbus_uint32_t publish_id;
+
+	if (!wpa_s->nan_de)
+		return NULL;
+
+	if (!dbus_message_get_args(message, NULL,
+				   DBUS_TYPE_UINT32, &publish_id,
+				   DBUS_TYPE_INVALID)) {
+		wpa_printf(MSG_DEBUG,
+			   "dbus: NANPublishStopListen failed to get args");
+		return wpas_dbus_error_invalid_args(message, NULL);
+	}
+
+	wpa_printf(MSG_DEBUG, "dbus: NANPublishStopListen: id=%u", publish_id);
+	if (wpas_nan_usd_publish_stop_listen(wpa_s, publish_id) < 0)
+		return wpas_dbus_error_unknown_error(
+			message, "error stopping listen");
+	return NULL;
+}
+
+
+/*
  * wpas_dbus_handler_nan_subscribe - Send out NAN USD subscribe messages
  * @message: Pointer to incoming dbus message
  * @wpa_s: wpa_supplicant structure for a network interface
@@ -6888,6 +6922,41 @@ wpas_dbus_handler_nan_cancel_subscribe(DBusMessage *message,
 
 	wpa_printf(MSG_DEBUG, "dbus: NANCancelSubscribe: id=%u", subscribe_id);
 	nan_de_cancel_subscribe(wpa_s->nan_de, subscribe_id);
+	return NULL;
+}
+
+
+/*
+ * wpas_dbus_handler_nan_subscribe_stop_listen - Stop listen for a NAN subscription
+ * @message: Pointer to incoming dbus message
+ * @wpa_s: wpa_supplicant structure for a network interface
+ * Returns: NULL indicating success or DBus error message on failure
+ *
+ * Handler function for "NANSubscribeStopListen" method call of network
+ * interface.
+ */
+DBusMessage *
+wpas_dbus_handler_nan_subscribe_stop_listen(DBusMessage *message,
+					    struct wpa_supplicant *wpa_s)
+{
+	dbus_uint32_t subscribe_id;
+
+	if (!wpa_s->nan_de)
+		return NULL;
+
+	if (!dbus_message_get_args(message, NULL,
+				   DBUS_TYPE_UINT32, &subscribe_id,
+				   DBUS_TYPE_INVALID)) {
+		wpa_printf(MSG_DEBUG,
+			   "dbus: NANSubscribeStopListen failed to get args");
+		return wpas_dbus_error_invalid_args(message, NULL);
+	}
+
+	wpa_printf(MSG_DEBUG, "dbus: NANSubscribeStopListen: id=%u",
+		   subscribe_id);
+	if (wpas_nan_usd_subscribe_stop_listen(wpa_s, subscribe_id) < 0)
+		return wpas_dbus_error_unknown_error(
+			message, "error stopping listen");
 	return NULL;
 }
 

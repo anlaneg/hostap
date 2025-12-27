@@ -1,6 +1,7 @@
 /*
  * hostapd / Callback functions for driver wrappers
  * Copyright (c) 2002-2013, Jouni Malinen <j@w1.fi>
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -189,7 +190,20 @@ static int hostapd_update_sta_links_status(struct hostapd_data *hapd,
 
 	/* Parse Subelements */
 	while (rem_len > 2) {
-		size_t ie_len = 2 + pos[1];
+		size_t ie_len, subelem_defrag_len;
+		int num_frag_subelems;
+
+		num_frag_subelems =
+			ieee802_11_defrag_mle_subelem(mlebuf, pos,
+						      &subelem_defrag_len);
+		if (num_frag_subelems < 0) {
+			wpa_printf(MSG_DEBUG,
+				   "MLD: Failed to parse MLE subelem");
+			break;
+		}
+
+		ie_len = 2 + subelem_defrag_len;
+		rem_len -= num_frag_subelems * 2;
 
 		if (rem_len < ie_len)
 			break;
@@ -200,13 +214,13 @@ static int hostapd_update_sta_links_status(struct hostapd_data *hapd,
 			size_t sta_profile_len;
 			u16 sta_ctrl;
 
-			if (pos[1] < BASIC_MLE_STA_CTRL_LEN + 1) {
+			if (subelem_defrag_len < BASIC_MLE_STA_CTRL_LEN + 1) {
 				wpa_printf(MSG_DEBUG,
 					   "MLO: Invalid per-STA profile IE");
 				goto next_subelem;
 			}
 
-			sta_profile_len = pos[1];
+			sta_profile_len = subelem_defrag_len;
 			sta_profile = &pos[2];
 			sta_ctrl = WPA_GET_LE16(sta_profile);
 			link_id = sta_ctrl & BASIC_MLE_STA_CTRL_LINK_ID_MASK;
@@ -317,6 +331,15 @@ int hostapd_notif_assoc(struct hostapd_data *hapd, const u8 *addr,
 	struct hostapd_iface *iface = hapd->iface;
 #endif /* CONFIG_OWE */
 	bool updated = false;
+	bool driver_acl;
+
+#ifdef CONFIG_P2P
+	if (hapd->p2p_group && (!hapd->started || hapd->disabled)) {
+		wpa_printf(MSG_DEBUG,
+			   "hostapd_notif_assoc: Ignore assoc event - P2P GO not started or disabled");
+		return 0;
+	}
+#endif /* CONFIG_P2P */
 
 	if (addr == NULL) {
 		/*
@@ -447,13 +470,57 @@ int hostapd_notif_assoc(struct hostapd_data *hapd, const u8 *addr,
 	 * ACL if the driver supports ACL offload to avoid potentially
 	 * conflicting ACL rules.
 	 */
-	if (hapd->iface->drv_max_acl_mac_addrs == 0 &&
+	driver_acl = hapd->iface->drv_max_acl_mac_addrs > 0;
+#ifdef CONFIG_IEEE80211BE
+	if (hapd->conf->mld_ap)
+		driver_acl = false;
+#endif /* CONFIG_IEEE80211BE */
+	if (!driver_acl &&
 	    hostapd_check_acl(hapd, addr, NULL) != HOSTAPD_ACL_ACCEPT) {
 		wpa_printf(MSG_INFO, "STA " MACSTR " not allowed to connect",
 			   MAC2STR(addr));
 		reason = WLAN_REASON_UNSPECIFIED;
 		goto fail;
 	}
+#ifdef CONFIG_IEEE80211BE
+	/*
+	 * The idea is that ACL is per link. For MLO associations, check
+	 * whether peer MLD MAC address is acceptable in all requested links.
+	 * For each peer link address, check the corresponding association
+	 * local link's ACL configuration whether it is acceptable.
+	 */
+	if (!driver_acl && hapd->conf->mld_ap && link_addr) {
+		int link_id;
+		struct mld_link_info *info;
+		struct hostapd_data *bss;
+
+		for (link_id = 0; link_id < MAX_NUM_MLD_LINKS; link_id++) {
+			info = &sta->mld_info.links[link_id];
+			if (!info->valid)
+				continue;
+
+			bss = hostapd_mld_get_link_bss(hapd, link_id);
+			if (bss && bss != hapd &&
+			    hostapd_check_acl(bss, addr, NULL) !=
+			    HOSTAPD_ACL_ACCEPT) {
+				wpa_printf(MSG_INFO, "STA " MACSTR
+					   " not allowed to connect",
+					   MAC2STR(addr));
+				reason = WLAN_REASON_UNSPECIFIED;
+				goto fail;
+			}
+			if (bss &&
+			    hostapd_check_acl(bss, info->peer_addr, NULL) !=
+			    HOSTAPD_ACL_ACCEPT) {
+				wpa_printf(MSG_INFO, "link addr " MACSTR
+					   " not allowed to connect",
+					   MAC2STR(info->peer_addr));
+				reason = WLAN_REASON_UNSPECIFIED;
+				goto fail;
+			}
+		}
+	}
+#endif /* CONFIG_IEEE80211BE */
 
 #ifdef CONFIG_P2P
 	if (elems.p2p) {
@@ -573,7 +640,8 @@ int hostapd_notif_assoc(struct hostapd_data *hapd, const u8 *addr,
 					  elems.rsnxe ? elems.rsnxe - 2 : NULL,
 					  elems.rsnxe ? elems.rsnxe_len + 2 : 0,
 					  elems.mdie, elems.mdie_len,
-					  elems.owe_dh, elems.owe_dh_len, NULL);
+					  elems.owe_dh, elems.owe_dh_len, NULL,
+					  ap_sta_is_mld(hapd, sta));
 		reason = WLAN_REASON_INVALID_IE;
 		status = WLAN_STATUS_INVALID_IE;
 		switch (res) {
@@ -730,7 +798,7 @@ skip_wpa_check:
 #ifdef CONFIG_IEEE80211R_AP
 	p = wpa_sm_write_assoc_resp_ies(sta->wpa_sm, buf, sizeof(buf),
 					sta->auth_alg, req_ies, req_ies_len,
-					!elems.rsnxe);
+					!elems.rsnxe, reassoc, sta->vlan_id);
 	if (!p) {
 		wpa_printf(MSG_DEBUG, "FT: Failed to write AssocResp IEs");
 		return WLAN_STATUS_UNSPECIFIED_FAILURE;
@@ -965,33 +1033,27 @@ static void hostapd_remove_sta(struct hostapd_data *hapd, struct sta_info *sta)
 
 
 #ifdef CONFIG_IEEE80211BE
-static void hostapd_notif_disassoc_mld(struct hostapd_data *assoc_hapd,
-				       struct sta_info *sta,
-				       const u8 *addr)
+void hostapd_notif_disassoc_mld(struct hostapd_data *assoc_hapd,
+				struct sta_info *sta, const u8 *addr)
 {
-	unsigned int link_id, i;
+	unsigned int i;
 	struct hostapd_data *tmp_hapd;
 	struct hapd_interfaces *interfaces = assoc_hapd->iface->interfaces;
 
 	/* Remove STA entry in non-assoc links */
-	for (link_id = 0; link_id < MAX_NUM_MLD_LINKS; link_id++) {
-		if (!sta->mld_info.links[link_id].valid)
+	for (i = 0; i < interfaces->count; i++) {
+		struct sta_info *tmp_sta;
+
+		tmp_hapd = interfaces->iface[i]->bss[0];
+
+		if (!tmp_hapd->conf->mld_ap ||
+		    assoc_hapd == tmp_hapd ||
+		    !hostapd_is_ml_partner(assoc_hapd, tmp_hapd))
 			continue;
 
-		for (i = 0; i < interfaces->count; i++) {
-			struct sta_info *tmp_sta;
-
-			tmp_hapd = interfaces->iface[i]->bss[0];
-
-			if (!tmp_hapd->conf->mld_ap ||
-			    assoc_hapd == tmp_hapd ||
-			    assoc_hapd->conf->mld_id != tmp_hapd->conf->mld_id)
-				continue;
-
-			tmp_sta = ap_get_sta(tmp_hapd, addr);
-			if (tmp_sta)
-				ap_free_sta(tmp_hapd, tmp_sta);
-		}
+		tmp_sta = ap_get_sta(tmp_hapd, addr);
+		if (tmp_sta)
+			ap_free_sta(tmp_hapd, tmp_sta);
 	}
 
 	/* Remove STA in assoc link */
@@ -1022,7 +1084,7 @@ void hostapd_notif_disassoc(struct hostapd_data *hapd, const u8 *addr)
 
 	sta = ap_get_sta(hapd, addr);
 #ifdef CONFIG_IEEE80211BE
-	if (hostapd_is_mld_ap(hapd)) {
+	if (hostapd_is_multiple_link_mld(hapd)) {
 		struct hostapd_data *assoc_hapd;
 		unsigned int i;
 
@@ -1036,7 +1098,7 @@ void hostapd_notif_disassoc(struct hostapd_data *hapd, const u8 *addr)
 				struct hostapd_bss_config *hconf = h_hapd->conf;
 
 				if (!hconf->mld_ap ||
-				    hconf->mld_id != hapd->conf->mld_id)
+				    !hostapd_is_ml_partner(hapd, h_hapd))
 					continue;
 
 				sta = ap_get_sta(h_hapd, addr);
@@ -1643,8 +1705,6 @@ static void hostapd_notif_auth(struct hostapd_data *hapd,
 {
 	struct sta_info *sta;
 	u16 status = WLAN_STATUS_SUCCESS;
-	u8 resp_ies[2 + WLAN_AUTH_CHALLENGE_LEN];
-	size_t resp_ies_len = 0;
 
 	sta = ap_get_sta(hapd, rx_auth->peer);
 	if (!sta) {
@@ -1689,7 +1749,7 @@ static void hostapd_notif_auth(struct hostapd_data *hapd,
 
 fail:
 	hostapd_sta_auth(hapd, rx_auth->peer, rx_auth->auth_transaction + 1,
-			 status, resp_ies, resp_ies_len);
+			 status, NULL, 0);
 }
 
 
@@ -2209,6 +2269,10 @@ static void hostapd_event_iface_unavailable(struct hostapd_data *hapd)
 		hostapd_switch_channel_fallback(hapd->iface,
 						&hapd->cs_freq_params);
 	}
+
+	/* Clear beacon_set_done so that the RNR and other beacon parameters
+	 * are properly updated. */
+	hapd->beacon_set_done = 0;
 }
 
 
@@ -2598,6 +2662,7 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 		hostapd_client_poll_ok(hapd, data->client_poll.addr);
 		break;
 	case EVENT_RX_FROM_UNKNOWN:
+		hapd = switch_link_hapd(hapd, data->rx_from_unknown.link_id);
 		hostapd_rx_from_unknown_sta(hapd, data->rx_from_unknown.bssid,
 					    data->rx_from_unknown.addr,
 					    data->rx_from_unknown.wds);
@@ -2740,6 +2805,9 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 #ifdef NEED_AP_MLME
 	case EVENT_INTERFACE_UNAVAILABLE:
 		hostapd_event_iface_unavailable(hapd);
+		/* Update beacon information in all other interfaces to cover
+		 * removal/disabling of this BSS. */
+		hostapd_refresh_all_iface_beacons(hapd->iface);
 		break;
 	case EVENT_DFS_RADAR_DETECTED:
 		if (!data)

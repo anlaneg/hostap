@@ -402,7 +402,7 @@ static inline int hostapd_drv_vendor_cmd(struct hostapd_data *hapd,
 
 static inline int hostapd_drv_stop_ap(struct hostapd_data *hapd)
 {
-	int link_id = -1;
+	int link_id = -1, ret;
 
 	if (!hapd->driver || !hapd->driver->stop_ap || !hapd->drv_priv)
 		return 0;
@@ -410,7 +410,13 @@ static inline int hostapd_drv_stop_ap(struct hostapd_data *hapd)
 	if (hapd->conf->mld_ap)
 		link_id = hapd->mld_link_id;
 #endif /* CONFIG_IEEE80211BE */
-	return hapd->driver->stop_ap(hapd->drv_priv, link_id);
+
+	ret = hapd->driver->stop_ap(hapd->drv_priv, link_id);
+	if (ret)
+		return ret;
+
+	hapd->beacon_set_done = 0;
+	return 0;
 }
 
 static inline int hostapd_drv_channel_info(struct hostapd_data *hapd,
@@ -495,5 +501,7 @@ int hostapd_drv_add_pmkid(struct hostapd_data *hapd,
 			  struct wpa_pmkid_params *params);
 int hostapd_add_pmkid(struct hostapd_data *hapd, const u8 *bssid, const u8 *pmk,
 		      size_t pmk_len, const u8 *pmkid, int akmp);
+int hostapd_remove_pmkid(struct hostapd_data *hapd, const u8 *sta_addr,
+			 const u8 *pmkid);
 
 #endif /* AP_DRV_OPS */

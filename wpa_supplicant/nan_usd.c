@@ -1,6 +1,6 @@
 /*
  * NAN unsynchronized service discovery (USD)
- * Copyright (c) 2024, Qualcomm Innovation Center, Inc.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -9,6 +9,7 @@
 #include "utils/includes.h"
 
 #include "utils/common.h"
+#include "utils/eloop.h"
 #include "common/nan_de.h"
 #include "wpa_supplicant_i.h"
 #include "offchannel.h"
@@ -16,6 +17,7 @@
 #include "notify.h"
 #include "p2p_supplicant.h"
 #include "nan_usd.h"
+#include "pr_supplicant.h"
 
 
 static const char *
@@ -181,6 +183,16 @@ static void wpas_nan_usd_listen_work_done(struct wpa_supplicant *wpa_s)
 }
 
 
+static void wpas_nan_usd_remain_on_channel_timeout(void *eloop_ctx,
+						   void *timeout_ctx)
+{
+	struct wpa_supplicant *wpa_s = eloop_ctx;
+	struct wpas_nan_usd_listen_work *lwork = timeout_ctx;
+
+	wpas_nan_usd_cancel_remain_on_channel_cb(wpa_s, lwork->freq);
+}
+
+
 static void wpas_nan_usd_start_listen_cb(struct wpa_radio_work *work,
 					 int deinit)
 {
@@ -208,6 +220,12 @@ static void wpas_nan_usd_start_listen_cb(struct wpa_radio_work *work,
 		wpa_printf(MSG_DEBUG,
 			   "NAN: Failed to request the driver to remain on channel (%u MHz) for listen",
 			   lwork->freq);
+		eloop_cancel_timeout(wpas_nan_usd_remain_on_channel_timeout,
+				     wpa_s, ELOOP_ALL_CTX);
+		/* Restart the listen state after a delay */
+		eloop_register_timeout(0, 500,
+				       wpas_nan_usd_remain_on_channel_timeout,
+				       wpa_s, lwork);
 		wpas_nan_usd_listen_work_done(wpa_s);
 		return;
 	}
@@ -271,12 +289,30 @@ static void wpas_nan_de_publish_terminated(void *ctx, int publish_id,
 }
 
 
+static void wpas_nan_usd_offload_cancel_publish(void *ctx, int publish_id)
+{
+	struct wpa_supplicant *wpa_s = ctx;
+
+	if (wpa_s->drv_flags2 & WPA_DRIVER_FLAGS2_NAN_OFFLOAD)
+		wpas_drv_nan_cancel_publish(wpa_s, publish_id);
+}
+
+
 static void wpas_nan_de_subscribe_terminated(void *ctx, int subscribe_id,
 					     enum nan_de_reason reason)
 {
 	struct wpa_supplicant *wpa_s = ctx;
 
 	wpas_notify_nan_subscribe_terminated(wpa_s, subscribe_id, reason);
+}
+
+
+static void wpas_nan_usd_offload_cancel_subscribe(void *ctx, int subscribe_id)
+{
+	struct wpa_supplicant *wpa_s = ctx;
+
+	if (wpa_s->drv_flags2 & WPA_DRIVER_FLAGS2_NAN_OFFLOAD)
+		wpas_drv_nan_cancel_subscribe(wpa_s, subscribe_id);
 }
 
 
@@ -303,6 +339,18 @@ static void wpas_nan_process_p2p_usd_elems(void *ctx, const u8 *buf,
 #endif /* CONFIG_P2P */
 
 
+#ifdef CONFIG_PR
+static void wpas_nan_process_pr_usd_elems(void *ctx, const u8 *buf, u16 buf_len,
+					  const u8 *peer_addr,
+					  unsigned int freq)
+{
+	struct wpa_supplicant *wpa_s = ctx;
+
+	wpas_pr_process_usd_elems(wpa_s, buf, buf_len, peer_addr, freq);
+}
+#endif /* CONFIG_PR */
+
+
 int wpas_nan_usd_init(struct wpa_supplicant *wpa_s)
 {
 	struct nan_callbacks cb;
@@ -316,10 +364,15 @@ int wpas_nan_usd_init(struct wpa_supplicant *wpa_s)
 	cb.replied = wpas_nan_de_replied;
 	cb.publish_terminated = wpas_nan_de_publish_terminated;
 	cb.subscribe_terminated = wpas_nan_de_subscribe_terminated;
+	cb.offload_cancel_publish = wpas_nan_usd_offload_cancel_publish;
+	cb.offload_cancel_subscribe = wpas_nan_usd_offload_cancel_subscribe;
 	cb.receive = wpas_nan_de_receive;
 #ifdef CONFIG_P2P
 	cb.process_p2p_usd_elems = wpas_nan_process_p2p_usd_elems;
 #endif /* CONFIG_P2P */
+#ifdef CONFIG_PR
+	cb.process_pr_usd_elems = wpas_nan_process_pr_usd_elems;
+#endif /* CONFIG_PR */
 
 	wpa_s->nan_de = nan_de_init(wpa_s->own_addr, offload, false,
 				    wpa_s->max_remain_on_chan, &cb);
@@ -331,6 +384,8 @@ int wpas_nan_usd_init(struct wpa_supplicant *wpa_s)
 
 void wpas_nan_usd_deinit(struct wpa_supplicant *wpa_s)
 {
+	eloop_cancel_timeout(wpas_nan_usd_remain_on_channel_timeout,
+			     wpa_s, ELOOP_ALL_CTX);
 	nan_de_deinit(wpa_s->nan_de);
 	wpa_s->nan_de = NULL;
 }
@@ -368,11 +423,19 @@ int wpas_nan_usd_publish(struct wpa_supplicant *wpa_s, const char *service_name,
 	if (!wpa_s->nan_de)
 		return -1;
 
+	if (params->proximity_ranging && !params->solicited) {
+		wpa_printf(MSG_INFO,
+			   "PR unsolicited publish service discovery not allowed");
+		return -1;
+	}
+
+	addr = wpa_s->own_addr;
+
 	if (p2p) {
 		elems = wpas_p2p_usd_elems(wpa_s, service_name);
 		addr = wpa_s->global->p2p_dev_addr;
-	} else {
-		addr = wpa_s->own_addr;
+	} else if (params->proximity_ranging) {
+		elems = wpas_pr_usd_elems(wpa_s);
 	}
 
 	publish_id = nan_de_publish(wpa_s->nan_de, service_name, srv_proto_type,
@@ -427,6 +490,42 @@ int wpas_nan_usd_unpause_publish(struct wpa_supplicant *wpa_s, int publish_id,
 }
 
 
+static int wpas_nan_stop_listen(struct wpa_supplicant *wpa_s, int id)
+{
+	if (wpa_s->drv_flags2 & WPA_DRIVER_FLAGS2_NAN_OFFLOAD)
+		return 0;
+
+	if (nan_de_stop_listen(wpa_s->nan_de, id) < 0)
+		return -1;
+
+	if (wpa_s->nan_usd_listen_work) {
+		wpa_printf(MSG_DEBUG, "NAN: Stop listen operation");
+		wpa_drv_cancel_remain_on_channel(wpa_s);
+		wpas_nan_usd_listen_work_done(wpa_s);
+	}
+
+	if (wpa_s->nan_usd_tx_work) {
+		wpa_printf(MSG_DEBUG, "NAN: Stop TX wait operation");
+		offchannel_send_action_done(wpa_s);
+		wpas_nan_usd_tx_work_done(wpa_s);
+	}
+
+	return 0;
+}
+
+
+int wpas_nan_usd_publish_stop_listen(struct wpa_supplicant *wpa_s,
+				     int publish_id)
+{
+	if (!wpa_s->nan_de)
+		return -1;
+
+	wpa_printf(MSG_DEBUG, "NAN: Request to stop listen for publish_id=%d",
+		   publish_id);
+	return wpas_nan_stop_listen(wpa_s, publish_id);
+}
+
+
 int wpas_nan_usd_subscribe(struct wpa_supplicant *wpa_s,
 			   const char *service_name,
 			   enum nan_service_protocol_type srv_proto_type,
@@ -440,11 +539,19 @@ int wpas_nan_usd_subscribe(struct wpa_supplicant *wpa_s,
 	if (!wpa_s->nan_de)
 		return -1;
 
+	if (params->proximity_ranging && !params->active) {
+		wpa_printf(MSG_INFO,
+			   "PR passive subscriber service discovery not allowed");
+		return -1;
+	}
+
+	addr = wpa_s->own_addr;
+
 	if (p2p) {
 		elems = wpas_p2p_usd_elems(wpa_s, service_name);
 		addr = wpa_s->global->p2p_dev_addr;
-	} else {
-		addr = wpa_s->own_addr;
+	} else if (params->proximity_ranging) {
+		elems = wpas_pr_usd_elems(wpa_s);
 	}
 
 	subscribe_id = nan_de_subscribe(wpa_s->nan_de, service_name,
@@ -473,6 +580,18 @@ void wpas_nan_usd_cancel_subscribe(struct wpa_supplicant *wpa_s,
 	nan_de_cancel_subscribe(wpa_s->nan_de, subscribe_id);
 	if (wpa_s->drv_flags2 & WPA_DRIVER_FLAGS2_NAN_OFFLOAD)
 		wpas_drv_nan_cancel_subscribe(wpa_s, subscribe_id);
+}
+
+
+int wpas_nan_usd_subscribe_stop_listen(struct wpa_supplicant *wpa_s,
+				       int subscribe_id)
+{
+	if (!wpa_s->nan_de)
+		return -1;
+
+	wpa_printf(MSG_DEBUG, "NAN: Request to stop listen for subscribe_id=%d",
+		   subscribe_id);
+	return wpas_nan_stop_listen(wpa_s, subscribe_id);
 }
 
 

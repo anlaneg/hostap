@@ -269,6 +269,10 @@ struct wpa_ssid {
 	 */
 	char *sae_password_id;
 
+	struct wpabuf_array *alt_sae_password_ids;
+	unsigned int alt_sae_passwords_ids_idx;
+	bool alt_sae_passwords_ids_used;
+
 	struct sae_pt *pt;
 
 	/**
@@ -992,6 +996,14 @@ struct wpa_ssid {
 	int macsec_csindex;
 
 	/**
+	 * macsec_icv_indicator - Always include ICV Indicator
+	 * (for compatibility with older MACsec switches)
+	 *
+	 * Range: 0-1 (default: 0)
+	 */
+	int macsec_icv_indicator;
+
+	/**
 	 * mka_ckn - MKA pre-shared CKN
 	 */
 #define MACSEC_CKN_MAX_LEN 32
@@ -1328,6 +1340,10 @@ struct wpa_ssid {
 	 */
 	int go_dik_id;
 
+	/**
+	 * sae_password_id_change - Whether to use changing SAE password IDs
+	 */
+	bool sae_password_id_change;
 };
 
 #endif /* CONFIG_SSID_H */

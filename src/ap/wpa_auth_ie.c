@@ -346,9 +346,6 @@ static u8 * rsne_write_data(u8 *buf, size_t len, u8 *pos, int group,
 
 		/* Management Group Cipher Suite */
 		switch (group_mgmt_cipher) {
-		case WPA_CIPHER_AES_128_CMAC:
-			RSN_SELECTOR_PUT(pos, RSN_CIPHER_SUITE_AES_128_CMAC);
-			break;
 		case WPA_CIPHER_BIP_GMAC_128:
 			RSN_SELECTOR_PUT(pos, RSN_CIPHER_SUITE_BIP_GMAC_128);
 			break;
@@ -496,8 +493,12 @@ static u32 rsnxe_capab(struct wpa_auth_config *conf, int key_mgmt)
 		capab |= BIT(WLAN_RSNX_CAPAB_SECURE_LTF);
 	if (conf->secure_rtt)
 		capab |= BIT(WLAN_RSNX_CAPAB_SECURE_RTT);
-	if (conf->prot_range_neg)
-		capab |= BIT(WLAN_RSNX_CAPAB_URNM_MFPR);
+	if (conf->prot_range_neg) {
+		if (conf->urnm_mfpr)
+			capab |= BIT(WLAN_RSNX_CAPAB_URNM_MFPR);
+		if (conf->urnm_mfpr_x20)
+			capab |= BIT(WLAN_RSNX_CAPAB_URNM_MFPR_X20);
+	}
 	if (conf->ssid_protection)
 		capab |= BIT(WLAN_RSNX_CAPAB_SSID_PROTECTION);
 	if (conf->spp_amsdu)
@@ -791,6 +792,32 @@ static int wpa_auth_okc_iter(struct wpa_authenticator *a, void *ctx)
 }
 
 
+#ifdef CONFIG_IEEE80211BE
+
+struct wpa_auth_link_iter_data {
+	struct wpa_authenticator *wpa_auth;
+	struct rsn_pmksa_cache_entry *pmksa;
+	const u8 *spa;
+	const u8 *pmkid;
+};
+
+static int wpa_auth_pmksa_iter(struct wpa_authenticator *a, void *ctx)
+{
+	struct wpa_auth_link_iter_data *data = ctx;
+
+	if (a == data->wpa_auth ||
+	    !ether_addr_equal(a->mld_addr, data->wpa_auth->mld_addr))
+		return 0;
+
+	data->pmksa = pmksa_cache_auth_get(a->pmksa, data->spa, data->pmkid);
+	if (data->pmksa)
+		return 1;
+	return 0;
+}
+
+#endif /* CONFIG_IEEE80211BE */
+
+
 enum wpa_validate_result
 wpa_validate_wpa_ie(struct wpa_authenticator *wpa_auth,
 		    struct wpa_state_machine *sm, int freq,
@@ -798,7 +825,7 @@ wpa_validate_wpa_ie(struct wpa_authenticator *wpa_auth,
 		    const u8 *rsnxe, size_t rsnxe_len,
 		    const u8 *mdie, size_t mdie_len,
 		    const u8 *owe_dh, size_t owe_dh_len,
-		    struct wpa_state_machine *assoc_sm)
+		    struct wpa_state_machine *assoc_sm, bool is_ml)
 {
 	struct wpa_auth_config *conf = &wpa_auth->conf;
 	struct wpa_ie_data data;
@@ -806,6 +833,7 @@ wpa_validate_wpa_ie(struct wpa_authenticator *wpa_auth,
 	u32 selector;
 	size_t i;
 	const u8 *pmkid = NULL;
+	bool ap_pmf_enabled;
 
 	if (wpa_auth == NULL || sm == NULL)
 		return WPA_NOT_ENABLED;
@@ -1088,8 +1116,16 @@ wpa_validate_wpa_ie(struct wpa_authenticator *wpa_auth,
 				 wpa_auth->conf.ocv : 0);
 	}
 #endif /* CONFIG_OCV */
+	if (sm->rsn_override_2)
+		ap_pmf_enabled = conf->rsn_override_mfp_2 !=
+			NO_MGMT_FRAME_PROTECTION;
+	else if (sm->rsn_override)
+		ap_pmf_enabled = conf->rsn_override_mfp !=
+			NO_MGMT_FRAME_PROTECTION;
+	else
+		ap_pmf_enabled = conf->ieee80211w != NO_MGMT_FRAME_PROTECTION;
 
-	if (!wpa_auth_pmf_enabled(conf) ||
+	if (!ap_pmf_enabled ||
 	    !(data.capabilities & WPA_CAPABILITY_MFPC))
 		sm->mgmt_frame_prot = 0;
 	else
@@ -1184,10 +1220,35 @@ wpa_validate_wpa_ie(struct wpa_authenticator *wpa_auth,
 
 	sm->pmksa = NULL;
 	for (i = 0; i < data.num_pmkid; i++) {
+		struct rsn_pmksa_cache *pmksa = wpa_auth->pmksa;
+
 		wpa_hexdump(MSG_DEBUG, "RSN IE: STA PMKID",
 			    &data.pmkid[i * PMKID_LEN], PMKID_LEN);
-		sm->pmksa = pmksa_cache_auth_get(wpa_auth->pmksa, sm->addr,
+#ifdef CONFIG_IEEE80211BE
+		if (is_ml)
+			pmksa = wpa_auth->ml_pmksa;
+#endif /* CONFIG_IEEE80211BE */
+		sm->pmksa = pmksa_cache_auth_get(pmksa, sm->addr,
 						 &data.pmkid[i * PMKID_LEN]);
+#ifdef CONFIG_IEEE80211BE
+		if (!sm->pmksa && !is_ml && wpa_auth->is_ml)
+			sm->pmksa = pmksa_cache_auth_get(
+				wpa_auth->ml_pmksa, sm->addr,
+				&data.pmkid[i * PMKID_LEN]);
+		if (!sm->pmksa && is_ml) {
+			struct wpa_auth_link_iter_data idata;
+
+			idata.wpa_auth = wpa_auth;
+			idata.pmksa = NULL;
+			idata.spa = sm->addr;
+			idata.pmkid = &data.pmkid[i * PMKID_LEN];
+			wpa_auth_for_each_auth(wpa_auth,
+					       wpa_auth_pmksa_iter,
+					       &idata);
+			if (idata.pmksa)
+				sm->pmksa = idata.pmksa;
+		}
+#endif /* CONFIG_IEEE80211BE */
 		if (!sm->pmksa && !is_zero_ether_addr(sm->p2p_dev_addr))
 			sm->pmksa = pmksa_cache_auth_get(
 				wpa_auth->pmksa, sm->p2p_dev_addr,
@@ -1223,7 +1284,8 @@ wpa_validate_wpa_ie(struct wpa_authenticator *wpa_auth,
 		wpa_auth_vlogger(wpa_auth, sm->addr, LOGGER_DEBUG,
 				 "PMKID found from PMKSA cache eap_type=%d vlan=%d%s",
 				 sm->pmksa->eap_type_authsrv,
-				 vlan ? vlan->untagged : 0,
+				 vlan ? vlan->untagged :
+				 sm->pmksa->sae_vlan_id,
 				 (vlan && vlan->tagged[0]) ? "+" : "");
 		os_memcpy(wpa_auth->dot11RSNAPMKIDUsed, pmkid, PMKID_LEN);
 	}
@@ -1347,8 +1409,7 @@ int wpa_auth_uses_ocv(struct wpa_state_machine *sm)
 
 #ifdef CONFIG_OWE
 u8 * wpa_auth_write_assoc_resp_owe(struct wpa_state_machine *sm,
-				   u8 *pos, size_t max_len,
-				   const u8 *req_ies, size_t req_ies_len)
+				   u8 *pos, size_t max_len)
 {
 	int res;
 	struct wpa_auth_config *conf;
@@ -1381,8 +1442,7 @@ u8 * wpa_auth_write_assoc_resp_owe(struct wpa_state_machine *sm,
 #ifdef CONFIG_FILS
 
 u8 * wpa_auth_write_assoc_resp_fils(struct wpa_state_machine *sm,
-				    u8 *pos, size_t max_len,
-				    const u8 *req_ies, size_t req_ies_len)
+				    u8 *pos, size_t max_len)
 {
 	int res;
 

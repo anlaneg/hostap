@@ -2,7 +2,7 @@
  * PASN initiator processing
  *
  * Copyright (C) 2019, Intel Corporation
- * Copyright (C) 2022, Qualcomm Innovation Center, Inc.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -17,6 +17,7 @@
 #include "common/ieee802_11_defs.h"
 #include "common/dragonfly.h"
 #include "crypto/sha384.h"
+#include "crypto/sha512.h"
 #include "crypto/crypto.h"
 #include "crypto/random.h"
 #include "eap_common/eap_defs.h"
@@ -107,6 +108,7 @@ static struct wpabuf * wpas_pasn_wd_sae_commit(struct pasn_data *pasn)
 		return NULL;
 	}
 
+	pasn->sae.akmp = pasn->akmp;
 	ret = sae_prepare_commit_pt(&pasn->sae, pasn->pt,
 				    pasn->own_addr, pasn->peer_addr,
 				    NULL, NULL);
@@ -126,7 +128,7 @@ static struct wpabuf * wpas_pasn_wd_sae_commit(struct pasn_data *pasn)
 	wpabuf_put_le16(buf, 1);
 	wpabuf_put_le16(buf, WLAN_STATUS_SAE_HASH_TO_ELEMENT);
 
-	sae_write_commit(&pasn->sae, buf, NULL, NULL);
+	sae_write_commit(&pasn->sae, buf, NULL, NULL, 0);
 	pasn->sae.state = SAE_COMMITTED;
 
 	return buf;
@@ -289,7 +291,7 @@ static struct wpabuf * wpas_pasn_fils_build_auth(struct pasn_data *pasn)
 	wpabuf_put_le16(buf, WLAN_AUTH_FILS_SK);
 
 	/* Authentication Transaction seq# */
-	wpabuf_put_le16(buf, 1);
+	wpabuf_put_le16(buf, WLAN_AUTH_TR_SEQ_PASN_AUTH1);
 
 	/* Status Code */
 	wpabuf_put_le16(buf, WLAN_STATUS_SUCCESS);
@@ -518,10 +520,11 @@ static struct wpabuf * wpas_pasn_get_wrapped_data(struct pasn_data *pasn)
 		/* no wrapped data */
 		return NULL;
 	case WPA_KEY_MGMT_SAE:
+	case WPA_KEY_MGMT_SAE_EXT_KEY:
 #ifdef CONFIG_SAE
 		if (pasn->trans_seq == 0)
 			return wpas_pasn_wd_sae_commit(pasn);
-		if (pasn->trans_seq == 2)
+		if (pasn->trans_seq == WLAN_AUTH_TR_SEQ_SAE_CONFIRM)
 			return wpas_pasn_wd_sae_confirm(pasn);
 #endif /* CONFIG_SAE */
 		wpa_printf(MSG_ERROR,
@@ -558,6 +561,7 @@ static u8 wpas_pasn_get_wrapped_data_format(struct pasn_data *pasn)
 	/* Note: Valid AKMP is expected to already be validated */
 	switch (pasn->akmp) {
 	case WPA_KEY_MGMT_SAE:
+	case WPA_KEY_MGMT_SAE_EXT_KEY:
 		return WPA_PASN_WRAPPED_DATA_SAE;
 	case WPA_KEY_MGMT_FILS_SHA256:
 	case WPA_KEY_MGMT_FILS_SHA384:
@@ -585,7 +589,6 @@ static struct wpabuf * wpas_pasn_build_auth_1(struct pasn_data *pasn,
 	struct wpabuf *buf, *pubkey = NULL, *wrapped_data_buf = NULL;
 	const u8 *pmkid;
 	u8 wrapped_data;
-	int ret;
 
 	wpa_printf(MSG_DEBUG, "PASN: Building frame 1");
 
@@ -641,9 +644,6 @@ static struct wpabuf * wpas_pasn_build_auth_1(struct pasn_data *pasn,
 	if (!wrapped_data_buf)
 		wrapped_data = WPA_PASN_WRAPPED_DATA_NO;
 
-	wpa_pasn_add_parameter_ie(buf, pasn->group, wrapped_data,
-				  pubkey, true, comeback, -1);
-
 	if (wpa_pasn_add_wrapped_data(buf, wrapped_data_buf) < 0)
 		goto fail;
 
@@ -652,14 +652,16 @@ static struct wpabuf * wpas_pasn_build_auth_1(struct pasn_data *pasn,
 	else
 		wpa_pasn_add_rsnxe(buf, pasn->rsnxe_capab);
 
+	wpa_pasn_add_parameter_ie(buf, pasn->group, wrapped_data,
+				  pubkey, true, comeback, -1);
+
 	wpa_pasn_add_extra_ies(buf, pasn->extra_ies, pasn->extra_ies_len);
 
-	ret = pasn_auth_frame_hash(pasn->akmp, pasn->cipher,
-				   wpabuf_head_u8(buf) + IEEE80211_HDRLEN,
-				   wpabuf_len(buf) - IEEE80211_HDRLEN,
-				   pasn->hash);
-	if (ret) {
-		wpa_printf(MSG_DEBUG, "PASN: Failed to compute hash");
+	wpabuf_free(pasn->auth1);
+	pasn->auth1 = wpabuf_alloc_copy(wpabuf_head_u8(buf) + IEEE80211_HDRLEN,
+					wpabuf_len(buf) - IEEE80211_HDRLEN);
+	if (!pasn->auth1) {
+		wpa_printf(MSG_DEBUG, "PASN: Failed to store a copy of Auth1");
 		goto fail;
 	}
 
@@ -689,10 +691,11 @@ static struct wpabuf * wpas_pasn_build_auth_3(struct pasn_data *pasn)
 	u8 *ptr;
 	u8 wrapped_data;
 	int ret;
+	u8 hash[SHA512_MAC_LEN];
 
 	wpa_printf(MSG_DEBUG, "PASN: Building frame 3");
 
-	if (pasn->trans_seq != 2)
+	if (pasn->trans_seq != WLAN_AUTH_TR_SEQ_PASN_AUTH2)
 		return NULL;
 
 	buf = wpabuf_alloc(1500);
@@ -703,20 +706,21 @@ static struct wpabuf * wpas_pasn_build_auth_3(struct pasn_data *pasn)
 
 	wpa_pasn_build_auth_header(buf, pasn->bssid,
 				   pasn->own_addr, pasn->peer_addr,
-				   pasn->trans_seq + 1, WLAN_STATUS_SUCCESS);
+				   WLAN_AUTH_TR_SEQ_PASN_AUTH3,
+				   WLAN_STATUS_SUCCESS);
 
 	wrapped_data_buf = wpas_pasn_get_wrapped_data(pasn);
 
 	if (!wrapped_data_buf)
 		wrapped_data = WPA_PASN_WRAPPED_DATA_NO;
 
-	wpa_pasn_add_parameter_ie(buf, pasn->group, wrapped_data,
-				  NULL, false, NULL, -1);
-
 	if (wpa_pasn_add_wrapped_data(buf, wrapped_data_buf) < 0)
 		goto fail;
 	wpabuf_free(wrapped_data_buf);
 	wrapped_data_buf = NULL;
+
+	wpa_pasn_add_parameter_ie(buf, pasn->group, wrapped_data,
+				  NULL, false, NULL, -1);
 
 	if (pasn->prepare_data_element && pasn->cb_ctx)
 		pasn->prepare_data_element(pasn->cb_ctx, pasn->peer_addr);
@@ -724,7 +728,7 @@ static struct wpabuf * wpas_pasn_build_auth_3(struct pasn_data *pasn)
 	wpa_pasn_add_extra_ies(buf, pasn->extra_ies, pasn->extra_ies_len);
 
 	/* Add the MIC */
-	mic_len = pasn_mic_len(pasn->akmp, pasn->cipher);
+	mic_len = pasn_mic_len(pasn->hash_alg);
 	wpabuf_put_u8(buf, WLAN_EID_MIC);
 	wpabuf_put_u8(buf, mic_len);
 	ptr = wpabuf_put(buf, mic_len);
@@ -734,9 +738,16 @@ static struct wpabuf * wpas_pasn_build_auth_3(struct pasn_data *pasn)
 	data = wpabuf_head_u8(buf) + IEEE80211_HDRLEN;
 	data_len = wpabuf_len(buf) - IEEE80211_HDRLEN;
 
-	ret = pasn_mic(pasn->ptk.kck, pasn->akmp, pasn->cipher,
+	if (!pasn->auth1 ||
+	    pasn_auth_frame_hash(pasn->hash_alg, wpabuf_head(pasn->auth1),
+				 wpabuf_len(pasn->auth1), hash)) {
+		wpa_printf(MSG_INFO, "PASN: Failed to calculate Auth1 hash");
+		goto fail;
+	}
+
+	ret = pasn_mic(pasn->hash_alg, pasn->ptk.kck, pasn->ptk.kck_len,
 		       pasn->own_addr, pasn->peer_addr,
-		       pasn->hash, mic_len * 2, data, data_len, mic);
+		       hash, mic_len * 2, data, data_len, mic);
 	if (ret) {
 		wpa_printf(MSG_DEBUG, "PASN: frame 3: Failed MIC calculation");
 		goto fail;
@@ -780,7 +791,9 @@ void wpa_pasn_reset(struct pasn_data *pasn)
 
 	forced_memzero(pasn->pmk, sizeof(pasn->pmk));
 	forced_memzero(&pasn->ptk, sizeof(pasn->ptk));
-	forced_memzero(&pasn->hash, sizeof(pasn->hash));
+
+	wpabuf_free(pasn->auth1);
+	pasn->auth1 = NULL;
 
 	wpabuf_free(pasn->beacon_rsne_rsnxe);
 	pasn->beacon_rsne_rsnxe = NULL;
@@ -827,6 +840,9 @@ void wpa_pasn_reset(struct pasn_data *pasn)
 
 	wpabuf_free(pasn->frame);
 	pasn->frame = NULL;
+
+	wpabuf_free(pasn->auth1);
+	pasn->auth1 = NULL;
 }
 
 
@@ -895,7 +911,8 @@ static int wpas_pasn_set_pmk(struct pasn_data *pasn,
 	}
 
 #ifdef CONFIG_SAE
-	if (pasn->akmp == WPA_KEY_MGMT_SAE) {
+	if (pasn->akmp == WPA_KEY_MGMT_SAE ||
+	    pasn->akmp == WPA_KEY_MGMT_SAE_EXT_KEY) {
 		int ret;
 
 		ret = wpas_pasn_wd_sae_rx(pasn, wrapped_data);
@@ -907,8 +924,8 @@ static int wpas_pasn_set_pmk(struct pasn_data *pasn,
 		}
 
 		wpa_printf(MSG_DEBUG, "PASN: Success deriving PMK with SAE");
-		pasn->pmk_len = PMK_LEN;
-		os_memcpy(pasn->pmk, pasn->sae.pmk, PMK_LEN);
+		pasn->pmk_len = pasn->sae.pmk_len;
+		os_memcpy(pasn->pmk, pasn->sae.pmk, pasn->pmk_len);
 
 		pasn->pmksa_entry = pmksa_cache_add(pasn->pmksa, pasn->pmk,
 						    pasn->pmk_len,
@@ -1037,6 +1054,7 @@ int wpas_pasn_start(struct pasn_data *pasn, const u8 *own_addr,
 		break;
 #ifdef CONFIG_SAE
 	case WPA_KEY_MGMT_SAE:
+	case WPA_KEY_MGMT_SAE_EXT_KEY:
 
 		if (beacon_rsnxe &&
 		    !ieee802_11_rsnx_capab(beacon_rsnxe,
@@ -1179,18 +1197,6 @@ int wpa_pasn_auth_rx(struct pasn_data *pasn, const u8 *data, size_t len,
 		goto fail;
 	}
 
-	/* Check that the MIC IE exists. Save it and zero out the memory */
-	mic_len = pasn_mic_len(pasn->akmp, pasn->cipher);
-	if (status == WLAN_STATUS_SUCCESS) {
-		if (!elems.mic || elems.mic_len != mic_len) {
-			wpa_printf(MSG_DEBUG,
-				   "PASN: Invalid MIC. Expecting len=%u",
-				   mic_len);
-			goto fail;
-		}
-		os_memcpy(mic, elems.mic, mic_len);
-	}
-
 	if (!elems.pasn_params || !elems.pasn_params_len) {
 		wpa_printf(MSG_DEBUG,
 			   "PASN: Missing PASN Parameters IE");
@@ -1310,7 +1316,7 @@ int wpa_pasn_auth_rx(struct pasn_data *pasn, const u8 *data, size_t len,
 			      pasn->own_addr, pasn->peer_addr,
 			      wpabuf_head(secret), wpabuf_len(secret),
 			      &pasn->ptk, pasn->akmp, pasn->cipher,
-			      pasn->kdk_len, pasn->kek_len);
+			      pasn->kdk_len, pasn->kek_len, &pasn->hash_alg);
 	if (ret) {
 		wpa_printf(MSG_DEBUG, "PASN: Failed to derive PTK");
 		goto fail;
@@ -1330,6 +1336,18 @@ int wpa_pasn_auth_rx(struct pasn_data *pasn, const u8 *data, size_t len,
 	wpabuf_free(secret);
 	secret = NULL;
 
+	/* Check that the MIC IE exists. Save it and zero out the memory */
+	mic_len = pasn_mic_len(pasn->hash_alg);
+	if (status == WLAN_STATUS_SUCCESS) {
+		if (!elems.mic || elems.mic_len != mic_len) {
+			wpa_printf(MSG_DEBUG,
+				   "PASN: Invalid MIC. Expecting len=%u",
+				   mic_len);
+			goto fail;
+		}
+		os_memcpy(mic, elems.mic, mic_len);
+	}
+
 	/* Use a copy of the message since we need to clear the MIC field */
 	if (!elems.mic)
 		goto fail;
@@ -1344,7 +1362,7 @@ int wpa_pasn_auth_rx(struct pasn_data *pasn, const u8 *data, size_t len,
 
 	if (pasn->beacon_rsne_rsnxe) {
 		/* Verify the MIC */
-		ret = pasn_mic(pasn->ptk.kck, pasn->akmp, pasn->cipher,
+		ret = pasn_mic(pasn->hash_alg, pasn->ptk.kck, pasn->ptk.kck_len,
 			       pasn->peer_addr, pasn->own_addr,
 			       wpabuf_head(pasn->beacon_rsne_rsnxe),
 			       wpabuf_len(pasn->beacon_rsne_rsnxe),
@@ -1379,7 +1397,7 @@ int wpa_pasn_auth_rx(struct pasn_data *pasn, const u8 *data, size_t len,
 				rsne_rsnxe, rsne_rsnxe_len);
 
 		/* Verify the MIC */
-		ret = pasn_mic(pasn->ptk.kck, pasn->akmp, pasn->cipher,
+		ret = pasn_mic(pasn->hash_alg, pasn->ptk.kck, pasn->ptk.kck_len,
 			       pasn->peer_addr, pasn->own_addr,
 			       rsne_rsnxe,
 			       rsne_rsnxe_len,
@@ -1478,7 +1496,7 @@ int wpa_pasn_auth_tx_status(struct pasn_data *pasn,
 	 * try to complete the flow, relying on the PASN timeout callback to
 	 * clean up.
 	 */
-	if (pasn->trans_seq == 3) {
+	if (pasn->trans_seq == WLAN_AUTH_TR_SEQ_PASN_AUTH3) {
 		wpa_printf(MSG_DEBUG, "PASN: auth complete with: " MACSTR,
 			   MAC2STR(pasn->peer_addr));
 		/*

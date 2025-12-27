@@ -1,6 +1,6 @@
 /*
  * NAN Discovery Engine
- * Copyright (c) 2024, Qualcomm Innovation Center, Inc.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -64,6 +64,8 @@ struct nan_de_service {
 	struct os_reltime next_publish_chan;
 	unsigned int next_publish_duration;
 	bool is_p2p;
+	bool is_pr;
+	bool listen_stopped;
 };
 
 struct nan_de {
@@ -603,6 +605,14 @@ static void nan_de_timer(void *eloop_ctx, void *timeout_ctx)
 		if (nan_de_srv_expired(srv, &now)) {
 			wpa_printf(MSG_DEBUG, "NAN: Service id %d expired",
 				   srv->id);
+			if (srv->type == NAN_DE_PUBLISH &&
+			    de->cb.offload_cancel_publish)
+				de->cb.offload_cancel_publish(de->cb.ctx,
+							      srv->id);
+			if (srv->type == NAN_DE_SUBSCRIBE &&
+			    de->cb.offload_cancel_subscribe)
+				de->cb.offload_cancel_subscribe(de->cb.ctx,
+								srv->id);
 			nan_de_del_srv(de, srv, NAN_DE_REASON_TIMEOUT);
 			continue;
 		}
@@ -632,6 +642,11 @@ static void nan_de_timer(void *eloop_ctx, void *timeout_ctx)
 			duration = os_reltime_in_ms(&diff);
 			if (duration < 0)
 				continue;
+			if (srv->listen_stopped) {
+				wpa_printf(MSG_DEBUG,
+					   "NAN: Publisher listen stopped temporarily - do not start driver listen operation");
+				continue;
+			}
 			if ((unsigned int) duration > de->max_listen)
 				duration = de->max_listen;
 			if (de->cb.listen(de->cb.ctx, srv->freq, duration) ==
@@ -660,6 +675,12 @@ static void nan_de_timer(void *eloop_ctx, void *timeout_ctx)
 		     (srv->type == NAN_DE_SUBSCRIBE &&
 		      !srv->subscribe.active))) {
 			int duration = 1000;
+
+			if (srv->listen_stopped) {
+				wpa_printf(MSG_DEBUG,
+					   "NAN: Listen stopped temporarily - do not start driver listen operation");
+				continue;
+			}
 
 			if (srv->type == NAN_DE_PUBLISH) {
 				nan_de_check_chan_change(srv);
@@ -718,6 +739,13 @@ void nan_de_listen_ended(struct nan_de *de, unsigned int freq)
 		de->listen_freq = 0;
 		nan_de_run_timer(de);
 	}
+}
+
+
+void nan_de_update_nmi(struct nan_de *de, const u8 *nmi)
+{
+	if (de)
+		os_memcpy(de->nmi, nmi, ETH_ALEN);
 }
 
 
@@ -834,7 +862,7 @@ static void nan_de_get_sdea(const u8 *buf, size_t len, u8 instance_id,
 
 static void nan_de_process_elem_container(struct nan_de *de, const u8 *buf,
 					  size_t len, const u8 *peer_addr,
-					  unsigned int freq, bool p2p)
+					  unsigned int freq, bool p2p, bool pr)
 {
 	const u8 *elem;
 	u16 elem_len;
@@ -856,6 +884,9 @@ static void nan_de_process_elem_container(struct nan_de *de, const u8 *buf,
 
 	if (p2p && de->cb.process_p2p_usd_elems)
 		de->cb.process_p2p_usd_elems(de->cb.ctx, elem, elem_len,
+					     peer_addr, freq);
+	if (pr && de->cb.process_pr_usd_elems)
+		de->cb.process_pr_usd_elems(de->cb.ctx, elem, elem_len,
 					     peer_addr, freq);
 }
 
@@ -1099,7 +1130,7 @@ static void nan_de_rx_sda(struct nan_de *de, const u8 *peer_addr, const u8 *a3,
 	sda += NAN_SERVICE_ID_LEN;
 	instance_id = *sda++;
 	req_instance_id = *sda++;
-	ctrl = *sda;
+	ctrl = *sda++;
 	type = ctrl & NAN_SRV_CTRL_TYPE_MASK;
 	wpa_printf(MSG_DEBUG,
 		   "NAN: SDA - Service ID %02x%02x%02x%02x%02x%02x Instance ID %u Requestor Instance ID %u Service Control 0x%x (Service Control Type %u)",
@@ -1196,7 +1227,8 @@ static void nan_de_rx_sda(struct nan_de *de, const u8 *peer_addr, const u8 *a3,
 					    ssi, ssi_len);
 			}
 			nan_de_process_elem_container(de, buf, len, peer_addr,
-						      freq, srv->is_p2p);
+						      freq, srv->is_p2p,
+						      srv->is_pr);
 		}
 
 		switch (type) {
@@ -1320,7 +1352,7 @@ int nan_de_publish(struct nan_de *de, const char *service_name,
 	int publish_id;
 	struct nan_de_service *srv;
 
-	if (!service_name) {
+	if (!service_name && !params->proximity_ranging) {
 		wpa_printf(MSG_DEBUG, "NAN: Publish() - no service_name");
 		return -1;
 	}
@@ -1328,6 +1360,12 @@ int nan_de_publish(struct nan_de *de, const char *service_name,
 	if (!params->unsolicited && !params->solicited) {
 		wpa_printf(MSG_INFO,
 			   "NAN: Publish() - both unsolicited and solicited disabled is invalid");
+		return -1;
+	}
+
+	if (params->proximity_ranging && params->solicited && !elems) {
+		wpa_printf(MSG_INFO,
+			   "NAN: Unable to fetch proximity ranging params");
 		return -1;
 	}
 
@@ -1340,11 +1378,18 @@ int nan_de_publish(struct nan_de *de, const char *service_name,
 		return -1;
 	srv->type = NAN_DE_PUBLISH;
 	srv->freq = srv->default_freq = params->freq;
-	srv->service_name = os_strdup(service_name);
-	if (!srv->service_name)
+
+	if (service_name) {
+		srv->service_name = os_strdup(service_name);
+		if (!srv->service_name)
+			goto fail;
+	}
+
+	if (params->proximity_ranging && !service_name)
+		os_memset(srv->service_id, 0, NAN_SERVICE_ID_LEN);
+	else if (nan_de_derive_service_id(srv) < 0)
 		goto fail;
-	if (nan_de_derive_service_id(srv) < 0)
-		goto fail;
+
 	os_memcpy(&srv->publish, params, sizeof(*params));
 
 	if (params->freq_list) {
@@ -1375,9 +1420,10 @@ int nan_de_publish(struct nan_de *de, const char *service_name,
 	nan_de_start_new_publish_state(srv, true);
 
 	wpa_printf(MSG_DEBUG, "NAN: Assigned new publish handle %d for %s",
-		   publish_id, service_name);
+		   publish_id, service_name ? service_name : "Ranging");
 	srv->id = publish_id;
 	srv->is_p2p = p2p;
+	srv->is_pr = params->proximity_ranging && params->solicited;
 	nan_de_add_srv(de, srv);
 	nan_de_run_timer(de);
 	return publish_id;
@@ -1460,8 +1506,14 @@ int nan_de_subscribe(struct nan_de *de, const char *service_name,
 	int subscribe_id;
 	struct nan_de_service *srv;
 
-	if (!service_name) {
+	if (!service_name && !params->proximity_ranging) {
 		wpa_printf(MSG_DEBUG, "NAN: Subscribe() - no service_name");
+		return -1;
+	}
+
+	if (params->proximity_ranging && params->active && !elems) {
+		wpa_printf(MSG_INFO,
+			   "NAN: Unable to fetch proximity ranging params");
 		return -1;
 	}
 
@@ -1474,11 +1526,18 @@ int nan_de_subscribe(struct nan_de *de, const char *service_name,
 		return -1;
 	srv->type = NAN_DE_SUBSCRIBE;
 	srv->freq = params->freq;
-	srv->service_name = os_strdup(service_name);
-	if (!srv->service_name)
+
+	if (service_name) {
+		srv->service_name = os_strdup(service_name);
+		if (!srv->service_name)
+			goto fail;
+	}
+
+	if (params->proximity_ranging && !service_name)
+		os_memset(srv->service_id, 0, NAN_SERVICE_ID_LEN);
+	else if (nan_de_derive_service_id(srv) < 0)
 		goto fail;
-	if (nan_de_derive_service_id(srv) < 0)
-		goto fail;
+
 	os_memcpy(&srv->subscribe, params, sizeof(*params));
 
 	if (params->freq_list) {
@@ -1504,9 +1563,10 @@ int nan_de_subscribe(struct nan_de *de, const char *service_name,
 	}
 
 	wpa_printf(MSG_DEBUG, "NAN: Assigned new subscribe handle %d for %s",
-		   subscribe_id, service_name);
+		   subscribe_id, service_name ? service_name : "Ranging");
 	srv->id = subscribe_id;
 	srv->is_p2p = p2p;
+	srv->is_pr = params->proximity_ranging && params->active;
 	nan_de_add_srv(de, srv);
 	nan_de_run_timer(de);
 	return subscribe_id;
@@ -1556,5 +1616,21 @@ int nan_de_transmit(struct nan_de *de, int handle,
 	nan_de_tx_sdf(de, srv, 100, NAN_SRV_CTRL_FOLLOW_UP,
 		      peer_addr, a3, req_instance_id, ssi);
 
+	srv->listen_stopped = false;
+	return 0;
+}
+
+
+int nan_de_stop_listen(struct nan_de *de, int handle)
+{
+	struct nan_de_service *srv;
+
+	if (handle < 1 || handle > NAN_DE_MAX_SERVICE)
+		return -1;
+
+	srv = de->service[handle - 1];
+	if (!srv)
+		return -1;
+	srv->listen_stopped = true;
 	return 0;
 }

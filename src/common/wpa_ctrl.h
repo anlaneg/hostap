@@ -118,6 +118,10 @@ extern "C" {
 #define WPA_EVENT_T2LM_UPDATE "CTRL-EVENT-T2LM-UPDATE "
 /** MLO link reconfiguration event */
 #define WPA_EVENT_LINK_RECONFIG "CTRL-EVENT-LINK-RECONFIG "
+/** MLO link STA removed through link reconfiguration */
+#define WPA_EVENT_LINK_STA_REMOVED "CTRL-EVENT-LINK-STA-REMOVED "
+/** MLO link STA added through link reconfiguration */
+#define WPA_EVENT_LINK_STA_ADDED "CTRL-EVENT-LINK-STA-ADDED "
 
 /** IP subnet status change notification
  *
@@ -466,6 +470,14 @@ extern "C" {
 
 /* PASN authentication status */
 #define PASN_AUTH_STATUS "PASN-AUTH-STATUS "
+
+/* Result of PASN performed for Proximity Ranging
+ * <result> role=<role> protocol=<protocol type> opclass=<op class> channel=<op channel> cc=<country>
+ */
+#define PR_PASN_RESULT "PR-PASN-RESULT "
+
+/* Proximity Ranging parameters to use in ranging */
+#define PR_RANGING_PARAMS "PR-RANGING-PARAMS "
 
 /* BSS command information masks */
 

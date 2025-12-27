@@ -258,6 +258,7 @@ void wpas_dbus_signal_preq(struct wpa_supplicant *wpa_s,
 void wpas_dbus_signal_eap_status(struct wpa_supplicant *wpa_s,
 				 const char *status, const char *parameter);
 void wpas_dbus_signal_psk_mismatch(struct wpa_supplicant *wpa_s);
+void wpas_dbus_signal_sae_password_mismatch(struct wpa_supplicant *wpa_s);
 void wpas_dbus_signal_sta_authorized(struct wpa_supplicant *wpa_s,
 				     const u8 *sta);
 void wpas_dbus_signal_sta_deauthorized(struct wpa_supplicant *wpa_s,
@@ -268,8 +269,9 @@ void wpas_dbus_signal_p2p_invitation_received(struct wpa_supplicant *wpa_s,
 					      int op_freq);
 void wpas_dbus_signal_p2p_bootstrap_req(struct wpa_supplicant *wpa_s,
 					const u8 *src, u16 bootstrap_method);
-void wpas_dbus_signal_p2p_bootstrap_completed(struct wpa_supplicant *wpa_s,
-					      const u8 *src, int status);
+void wpas_dbus_signal_p2p_bootstrap_rsp(struct wpa_supplicant *wpa_s,
+					const u8 *src, int status,
+					u16 bootstrap_method);
 void wpas_dbus_signal_mesh_group_started(struct wpa_supplicant *wpa_s,
 					 struct wpa_ssid *ssid);
 void wpas_dbus_signal_mesh_group_removed(struct wpa_supplicant *wpa_s,
@@ -623,6 +625,11 @@ static inline void wpas_dbus_signal_psk_mismatch(struct wpa_supplicant *wpa_s)
 {
 }
 
+static inline void
+wpas_dbus_signal_sae_password_mismatch(struct wpa_supplicant *wpa_s)
+{
+}
+
 static inline
 void wpas_dbus_signal_sta_authorized(struct wpa_supplicant *wpa_s,
 				     const u8 *sta)
@@ -650,8 +657,9 @@ void wpas_dbus_signal_p2p_bootstrap_req(struct wpa_supplicant *wpa_s,
 }
 
 static inline
-void wpas_dbus_signal_p2p_bootstrap_completed(struct wpa_supplicant *wpa_s,
-					      const u8 *src, int status)
+void wpas_dbus_signal_p2p_bootstrap_rsp(struct wpa_supplicant *wpa_s,
+					const u8 *src, int status,
+					u16 bootstrap_method)
 {
 }
 

@@ -381,6 +381,10 @@ static void hostapd_ext_capab_byte(struct hostapd_data *hapd, u8 *pos, int idx,
 			/* Bit 13 - Collocated Interference Reporting */
 			*pos |= 0x20;
 		}
+		if (hapd->iface->conf->civic)
+			*pos |= 0x40; /* Bit 14 - Civic Location */
+		if (hapd->iface->conf->lci)
+			*pos |= 0x80; /* Bit 15 - Geospatial Location */
 		break;
 	case 2: /* Bits 16-23 */
 		if (hapd->conf->wnm_sleep_mode)
@@ -477,6 +481,8 @@ static void hostapd_ext_capab_byte(struct hostapd_data *hapd, u8 *pos, int idx,
 #endif /* CONFIG_SAE_PK */
 		break;
 	case 12: /* Bits 96-103 */
+		if (hapd->iconf->i2r_lmr_policy)
+			*pos |= 0x02; /* Bit 97 - I2R LMR Feedback Policy */
 		if (hapd->iconf->peer_to_peer_twt)
 			*pos |= 0x10; /* Bit 100 - Peer to Peer TWT */
 		if (hapd->conf->known_sta_identification)
@@ -1136,8 +1142,12 @@ u8 * hostapd_eid_rsnxe(struct hostapd_data *hapd, u8 *eid, size_t len)
 		capab |= BIT(WLAN_RSNX_CAPAB_SECURE_LTF);
 	if (hapd->iface->drv_flags2 & WPA_DRIVER_FLAGS2_SEC_RTT_AP)
 		capab |= BIT(WLAN_RSNX_CAPAB_SECURE_RTT);
-	if (hapd->iface->drv_flags2 & WPA_DRIVER_FLAGS2_PROT_RANGE_NEG_AP)
-		capab |= BIT(WLAN_RSNX_CAPAB_URNM_MFPR);
+	if (hapd->iface->drv_flags2 & WPA_DRIVER_FLAGS2_PROT_RANGE_NEG_AP) {
+		if (hapd->conf->urnm_mfpr != 0)
+			capab |= BIT(WLAN_RSNX_CAPAB_URNM_MFPR);
+		if (hapd->conf->urnm_mfpr_x20 == 1)
+			capab |= BIT(WLAN_RSNX_CAPAB_URNM_MFPR_X20);
+	}
 	if (hapd->conf->ssid_protection)
 		capab |= BIT(WLAN_RSNX_CAPAB_SSID_PROTECTION);
 	if ((hapd->iface->drv_flags2 & WPA_DRIVER_FLAGS2_SPP_AMSDU) &&

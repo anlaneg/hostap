@@ -298,6 +298,9 @@ struct hostapd_bss_config {
 
 	int max_num_sta; /* maximum number of STAs in station table */
 
+	enum beacon_rate_type rate_type;
+	unsigned int beacon_rate;
+
 	int dtim_period;
 	unsigned int bss_load_update_period;
 	unsigned int chan_util_avg_period;
@@ -329,6 +332,9 @@ struct hostapd_bss_config {
 	size_t radius_das_shared_secret_len;
 
 	struct hostapd_ssid ssid;
+
+	int *supported_rates;
+	int *basic_rates;
 
 	char *eap_req_id_text; /* optional displayable message sent with
 				* EAP Request-Identity */
@@ -471,6 +477,7 @@ struct hostapd_bss_config {
 	char *radius_server_clients;
 	int radius_server_auth_port;
 	int radius_server_acct_port;
+	int radius_server_acct_log;
 	int radius_server_ipv6;
 
 	int use_pae_group_addr; /* Whether to send EAPOL frames to PAE group
@@ -663,7 +670,10 @@ struct hostapd_bss_config {
 	enum sae_pwe sae_pwe;
 	int *sae_groups;
 	struct sae_password_entry *sae_passwords;
+	int sae_password_psk;
 	int sae_track_password;
+	struct wpabuf *sae_pw_id_key;
+	unsigned int sae_pw_id_num;
 
 	char *wowlan_triggers; /* Wake-on-WLAN triggers */
 
@@ -895,6 +905,14 @@ struct hostapd_bss_config {
 	int macsec_csindex;
 
 	/**
+	 * macsec_icv_indicator - Always include ICV Indicator
+	 * (for compatibility with older MACsec switches)
+	 *
+	 * Range: 0-1 (default: 0)
+	 */
+	int macsec_icv_indicator;
+
+	/**
 	 * mka_ckn - MKA pre-shared CKN
 	 */
 #define MACSEC_CKN_MAX_LEN 32
@@ -940,6 +958,9 @@ struct hostapd_bss_config {
 	 */
 	u16 pasn_comeback_after;
 #endif /* CONFIG_PASN */
+
+	int urnm_mfpr_x20;
+	int urnm_mfpr;
 
 	unsigned int unsol_bcast_probe_resp_interval;
 
@@ -1048,11 +1069,6 @@ struct hostapd_config {
 		LONG_PREAMBLE = 0,
 		SHORT_PREAMBLE = 1
 	} preamble;
-
-	int *supported_rates;
-	int *basic_rates;
-	unsigned int beacon_rate;
-	enum beacon_rate_type rate_type;
 
 	//配置文件指定驱动名，在wpa_drivers数组中查找到的驱动
 	const struct wpa_driver_ops *driver;//接口使用的驱动
@@ -1234,6 +1250,9 @@ struct hostapd_config {
 
 	bool channel_usage;
 	bool peer_to_peer_twt;
+
+	/* Set I2R LMR policy to allow LMR response from ISTA */
+	bool i2r_lmr_policy;
 };
 
 
@@ -1372,7 +1391,6 @@ void hostapd_config_free_bss(struct hostapd_bss_config *conf);
 void hostapd_config_free(struct hostapd_config *conf);
 int hostapd_maclist_found(struct mac_acl_entry *list, int num_entries,
 			  const u8 *addr, struct vlan_description *vlan_id);
-int hostapd_rate_found(int *list, int rate);
 const u8 * hostapd_get_psk(const struct hostapd_bss_config *conf,
 			   const u8 *addr, const u8 *p2p_dev_addr,
 			   const u8 *prev_psk, int *vlan_id);
@@ -1396,5 +1414,6 @@ int hostapd_add_acl_maclist(struct mac_acl_entry **acl, int *num,
 			    int vlan_id, const u8 *addr);
 void hostapd_remove_acl_mac(struct mac_acl_entry **acl, int *num,
 			    const u8 *addr);
+bool hostapd_config_check_bss_6g(struct hostapd_bss_config *bss);
 
 #endif /* HOSTAPD_CONFIG_H */
