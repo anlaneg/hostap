@@ -6119,8 +6119,8 @@ static int wpa_supplicant_ctrl_iface_roam(struct wpa_supplicant *wpa_s,
 #ifdef CONFIG_P2P
 static int p2p_ctrl_find(struct wpa_supplicant *wpa_s, char *cmd)
 {
-	unsigned int timeout = atoi(cmd);
-	enum p2p_discovery_type type = P2P_FIND_START_WITH_FULL;
+	unsigned int timeout = atoi(cmd);/*首个参数指明的为timeout时间,如不指明，则为0*/
+	enum p2p_discovery_type type = P2P_FIND_START_WITH_FULL;/*默认发现方式*/
 	u8 dev_id[ETH_ALEN], *_dev_id = NULL;
 	u8 dev_type[WPS_DEV_TYPE_LEN], *_dev_type = NULL;
 	char *pos;
@@ -6146,7 +6146,7 @@ static int p2p_ctrl_find(struct wpa_supplicant *wpa_s, char *cmd)
 	pos = os_strstr(cmd, "dev_id=");
 	if (pos) {
 		pos += 7;
-		if (hwaddr_aton(pos, dev_id))
+		if (hwaddr_aton(pos, dev_id))/*字符串转mac地址*/
 			return -1;
 		_dev_id = dev_id;
 	}
@@ -13424,9 +13424,11 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
 #endif /* CONFIG_MESH */
 #ifdef CONFIG_P2P
 	} else if (os_strncmp(buf, "P2P_FIND ", 9) == 0) {
+		/*执行P2P_FIND带参数情况*/
 		if (p2p_ctrl_find(wpa_s, buf + 8))
 			reply_len = -1;
 	} else if (os_strcmp(buf, "P2P_FIND") == 0) {
+		/*执行P2P_FIND不带参数情况*/
 		if (p2p_ctrl_find(wpa_s, ""))
 			reply_len = -1;
 	} else if (os_strcmp(buf, "P2P_STOP_FIND") == 0) {

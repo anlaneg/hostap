@@ -2019,7 +2019,7 @@ void wpa_supplicant_cancel_delayed_sched_scan(struct wpa_supplicant *wpa_s)
 void wpa_supplicant_cancel_sched_scan(struct wpa_supplicant *wpa_s)
 {
 	if (!wpa_s->sched_scanning)
-		return;
+		return;/*没有扫描，不用取消*/
 
 	if (wpa_s->sched_scanning)
 		wpa_s->sched_scan_stop_req = 1;

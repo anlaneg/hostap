@@ -198,7 +198,7 @@ int wps_build_version(struct wpabuf *msg)
 	if (wpabuf_tailroom(msg) < 5)
 		return -1;
 	wpa_printf(MSG_DEBUG, "WPS:  * Version (hardcoded 0x10)");
-	wpabuf_put_be16(msg, ATTR_VERSION);
+	wpabuf_put_be16(msg, ATTR_VERSION);/*存入*/
 	wpabuf_put_be16(msg, 1);
 	wpabuf_put_u8(msg, 0x10);
 	return 0;

@@ -6428,6 +6428,7 @@ static int nl80211_create_iface_once(struct wpa_driver_nl80211_data *drv,
 	wpa_printf(MSG_DEBUG, "nl80211: Create interface iftype %d (%s)",
 		   iftype, nl80211_iftype_str(iftype));
 
+	/*构造创建interface的消息*/
 	msg = nl80211_cmd_msg(drv->first_bss, 0, NL80211_CMD_NEW_INTERFACE);
 	if (!msg ||
 	    nla_put_string(msg, NL80211_ATTR_IFNAME, ifname) ||
@@ -11247,7 +11248,7 @@ static int driver_nl80211_scan2(void *priv,
 	if (drv->scan_vendor_cmd_avail && !params->only_new_results)
 		return wpa_driver_nl80211_vendor_scan(bss, params);
 #endif /* CONFIG_DRIVER_NL80211_QCA */
-	return wpa_driver_nl80211_scan(bss, params);
+	return wpa_driver_nl80211_scan(bss, params);/*通过nl80211扫描*/
 }
 
 

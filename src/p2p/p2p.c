@@ -1204,6 +1204,7 @@ int p2p_find(struct p2p_data *p2p, unsigned int timeout,
 
 	p2p_dbg(p2p, "Starting find (type=%d)", type);
 	if (p2p->p2p_scan_running) {
+		/*扫描已在进行*/
 		p2p_dbg(p2p, "p2p_scan is already running");
 	}
 
@@ -1279,15 +1280,15 @@ int p2p_find(struct p2p_data *p2p, unsigned int timeout,
 		p2p->find_specified_freq = 0;
 	p2p_device_clear_reported(p2p);
 	os_memset(p2p->sd_query_no_ack, 0, ETH_ALEN);
-	p2p_set_state(p2p, P2P_SEARCH);
+	p2p_set_state(p2p, P2P_SEARCH);/*变更为search状态*/
 	p2p->search_delay = search_delay;
 	p2p->in_search_delay = 0;
-	eloop_cancel_timeout(p2p_find_timeout, p2p, NULL);
+	eloop_cancel_timeout(p2p_find_timeout, p2p, NULL);/*防止之前已设置定时器，这里取消*/
 	p2p->last_p2p_find_timeout = timeout;
 	if (timeout)
 		eloop_register_timeout(timeout, 0, p2p_find_timeout,
-				       p2p, NULL);
-	os_get_reltime(&start);
+				       p2p, NULL);/*如指明超时时间，则添加定时器*/
+	os_get_reltime(&start);/*取扫描起始时间*/
 	switch (type) {
 	case P2P_FIND_START_WITH_FULL:
 		if (freq > 0) {
@@ -1300,7 +1301,7 @@ int p2p_find(struct p2p_data *p2p, unsigned int timeout,
 						 p2p->num_req_dev_types,
 						 p2p->req_dev_types, dev_id,
 						 DEV_PW_DEFAULT,
-						 p2p->include_6ghz);
+						 p2p->include_6ghz);/*执行扫描，例如wpas_p2p_scan*/
 			break;
 		}
 		/* fall through */

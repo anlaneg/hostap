@@ -61,9 +61,9 @@ struct eloop_timeout {
 };
 
 struct eloop_signal {
-	int sig;
+	int sig;/*信号值*/
 	void *user_data;
-	eloop_signal_handler handler;
+	eloop_signal_handler handler;/*信号处理回调*/
 	int signaled;//指明此信号在未绝期间触发了多少次
 };
 
@@ -107,7 +107,7 @@ struct eloop_data {
 
 	size_t signal_count;//信号处理数组大小
 	struct eloop_signal *signals;//信号处理数组
-	int signaled;//一共有多少信号发生
+	int signaled;//一共有多少信号发生(也表明是否有信号发生）
 	int pending_terminate;//正在等待循环结束
 
 	int terminate;//eloop循环是否需要中止
@@ -584,11 +584,11 @@ static void eloop_sock_table_set_fds(struct eloop_sock_table *table,
 	FD_ZERO(fds);
 
 	if (table->table == NULL)
-		return;
+		return;/*无socket直接返回*/
 
 	for (i = 0; i < table->count; i++) {
 		assert(table->table[i].sock >= 0);
-		FD_SET(table->table[i].sock, fds);
+		FD_SET(table->table[i].sock, fds);/*将此socket填入到fds中*/
 	}
 }
 
@@ -609,7 +609,7 @@ static void eloop_sock_table_dispatch(struct eloop_sock_table *table,
 						table->table[i].eloop_data,
 						table->table[i].user_data);
 			if (table->changed)
-				break;
+				break;/*回调处理中发生变更，不再继续处理*/
 		}
 	}
 }
@@ -1000,6 +1000,7 @@ static void eloop_handle_alarm(int sig)
 #endif /* CONFIG_NATIVE_WINDOWS */
 
 
+/*负责代理所有信号处理函数（将信号处理记录下来，由eventloop再转发给其对应的handle)*/
 static void eloop_handle_signal(int sig)
 {
 	size_t i;
@@ -1014,8 +1015,9 @@ static void eloop_handle_signal(int sig)
 	}
 #endif /* CONFIG_NATIVE_WINDOWS */
 
-	//增加信号触发
+	//标记信号有触发
 	eloop.signaled++;
+	/*标记哪个信号被触发*/
 	for (i = 0; i < eloop.signal_count; i++) {
 		if (eloop.signals[i].sig == sig) {
 			eloop.signals[i].signaled++;
@@ -1029,10 +1031,10 @@ static void eloop_process_pending_signals(void)
 {
 	size_t i;
 
-	//无信号触发，直接返回
+	//无信号触发，不处理直接返回
 	if (eloop.signaled == 0)
 		return;
-	eloop.signaled = 0;
+	eloop.signaled = 0;/*相当于开信号中断*/
 
 	if (eloop.pending_terminate) {
 #ifndef CONFIG_NATIVE_WINDOWS
@@ -1041,7 +1043,7 @@ static void eloop_process_pending_signals(void)
 		eloop.pending_terminate = 0;
 	}
 
-	//如果有过触发，则调用1次
+	//依据信号触发的次数，调用相应次信号处理函数
 	for (i = 0; i < eloop.signal_count; i++) {
 		if (eloop.signals[i].signaled) {
 			eloop.signals[i].signaled = 0;
@@ -1053,7 +1055,7 @@ static void eloop_process_pending_signals(void)
 
 //实现信号注册（将信号放入loop中统一进行事件处理）
 int eloop_register_signal(int sig, eloop_signal_handler handler,
-			  void *user_data)
+			  void *user_data/*信号处理回调叁数*/)
 {
 	struct eloop_signal *tmp;
 
@@ -1077,7 +1079,7 @@ int eloop_register_signal(int sig, eloop_signal_handler handler,
 }
 
 //eloop信号注册（SIGINT,SIGTRM)
-int eloop_register_signal_terminate(eloop_signal_handler handler,
+int eloop_register_signal_terminate(eloop_signal_handler handler/*信号处理函数*/,
 				    void *user_data)
 {
 	int ret = eloop_register_signal(SIGINT, handler, user_data);
@@ -1141,12 +1143,12 @@ void eloop_run(void)
 			 * avoid hitting the SIGALRM limit if the blocking
 			 * operation took more than two seconds.
 			 */
-			eloop_process_pending_signals();
+			eloop_process_pending_signals();/*处理退出类信号*/
 			if (eloop.terminate)
 				break;
 		}
 
-		//取定时器链表头
+		//处理定时器，1。取定时器链表头
 		timeout = dl_list_first(&eloop.timeout, struct eloop_timeout,
 					list);
 		if (timeout) {
@@ -1155,7 +1157,7 @@ void eloop_run(void)
 				//不到超时时间，取差值tv
 				os_reltime_sub(&timeout->time, &now, &tv);
 			else
-				//已过超时间间，取0
+				//已过超时间间，故直接取0
 				tv.sec = tv.usec = 0;
 #if defined(CONFIG_ELOOP_POLL) || defined(CONFIG_ELOOP_EPOLL)
 			timeout_ms = tv.sec * 1000 + tv.usec / 1000;
@@ -1184,7 +1186,7 @@ void eloop_run(void)
 		eloop_sock_table_set_fds(&eloop.readers, rfds);
 		eloop_sock_table_set_fds(&eloop.writers, wfds);
 		eloop_sock_table_set_fds(&eloop.exceptions, efds);
-		//如果无timeout,则超时时间为NULL，即不超时
+		//如果无timer超时,则超时时间为NULL，即不超时
 		res = select(eloop.max_sock + 1, rfds, wfds, efds,
 			     timeout ? &_tv : NULL);
 #endif /* CONFIG_ELOOP_SELECT */
@@ -1206,7 +1208,7 @@ void eloop_run(void)
 		}
 #endif /* CONFIG_ELOOP_KQUEUE */
 		if (res < 0 && errno != EINTR && errno != 0) {
-			//select出错，报错
+			//等待事件出错，报错
 			wpa_printf(MSG_ERROR, "eloop: %s: %s",
 #ifdef CONFIG_ELOOP_POLL
 				   "poll"
@@ -1225,16 +1227,17 @@ void eloop_run(void)
 			goto out;
 		}
 
+		/*容许回调通过以下三个变量，指明关注的fd事件发生变化*/
 		eloop.readers.changed = 0;
 		eloop.writers.changed = 0;
 		eloop.exceptions.changed = 0;
 
-		//信号处理
+		//信号处理（优先）
 		eloop_process_pending_signals();
 
 
 		/* check if some registered timeouts have occurred */
-		//等待fd完成，先考虑定时器
+		//定时器处理,每次仅处理一个。（中优）
 		timeout = dl_list_first(&eloop.timeout, struct eloop_timeout,
 					list);
 		if (timeout) {
@@ -1248,7 +1251,7 @@ void eloop_run(void)
 				//删除定时器
 				eloop_remove_timeout(timeout);
 
-				//执行定时器指明的回调
+				//执行此定时器指明的回调
 				handler(eloop_data, user_data);
 			}
 
@@ -1279,7 +1282,7 @@ void eloop_run(void)
 #endif /* CONFIG_ELOOP_POLL */
 #ifdef CONFIG_ELOOP_SELECT
 
-		//处理fd事件
+		//处理fd事件（低优）
 		eloop_sock_table_dispatch(&eloop.readers, rfds);
 		eloop_sock_table_dispatch(&eloop.writers, wfds);
 		eloop_sock_table_dispatch(&eloop.exceptions, efds);

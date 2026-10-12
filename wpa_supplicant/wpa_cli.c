@@ -138,7 +138,7 @@ static int wpa_cli_open_connection(const char *ifname, int attach)
 	int flen, res;
 
 	if (ifname == NULL)
-		return -1;
+		return -1;/*未提供ifname,直接返回*/
 
 #ifdef ANDROID
 	if (access(ctrl_iface_dir, F_OK) < 0) {
@@ -161,13 +161,14 @@ static int wpa_cli_open_connection(const char *ifname, int attach)
 		if (cfile == NULL)
 			return -1;
 		res = os_snprintf(cfile, flen, "%s/%s", ctrl_iface_dir,
-				  ifname);
+				  ifname);/*利用ctrl_iface_dir构造文件路径做为配置文件路径*/
 		if (os_snprintf_error(flen, res)) {
 			os_free(cfile);
 			return -1;
 		}
 	}
 
+	/*连接远端构造ctrl_conn*/
 	ctrl_conn = wpa_ctrl_open2(cfile, client_socket_dir);
 	if (ctrl_conn == NULL) {
 		os_free(cfile);
@@ -175,6 +176,7 @@ static int wpa_cli_open_connection(const char *ifname, int attach)
 	}
 
 	if (attach && interactive)
+		/*连接到远端构造mon_conn*/
 		mon_conn = wpa_ctrl_open2(cfile, client_socket_dir);
 	else
 		mon_conn = NULL;
@@ -182,12 +184,12 @@ static int wpa_cli_open_connection(const char *ifname, int attach)
 #endif /* CONFIG_CTRL_IFACE_UDP || CONFIG_CTRL_IFACE_NAMED_PIPE */
 
 	if (mon_conn) {
-		if (wpa_ctrl_attach(mon_conn) == 0) {
+		if (wpa_ctrl_attach(mon_conn) == 0) {/*执行monitor attach成功*/
 			wpa_cli_attached = 1;
 			if (interactive)
 				eloop_register_read_sock(
 					wpa_ctrl_get_fd(mon_conn),
-					wpa_cli_mon_receive, NULL, NULL);
+					wpa_cli_mon_receive/*注册monitor连接处理函数*/, NULL, NULL);
 		} else {
 			printf("Warning: Failed to attach to "
 			       "wpa_supplicant.\n");
@@ -203,14 +205,15 @@ static int wpa_cli_open_connection(const char *ifname, int attach)
 static void wpa_cli_close_connection(void)
 {
 	if (ctrl_conn == NULL)
-		return;
+		return;/*已关闭，不必再执行*/
 
 	if (wpa_cli_attached) {
+		/*优先执行detach*/
 		wpa_ctrl_detach(interactive ? mon_conn : ctrl_conn);
 		wpa_cli_attached = 0;
 	}
 	wpa_ctrl_close(ctrl_conn);
-	ctrl_conn = NULL;
+	ctrl_conn = NULL;/*关闭ctrl_conn*/
 	if (mon_conn) {
 		eloop_unregister_read_sock(wpa_ctrl_get_fd(mon_conn));
 		wpa_ctrl_close(mon_conn);
@@ -237,13 +240,14 @@ static int _wpa_ctrl_command(struct wpa_ctrl *ctrl, const char *cmd, int print)
 	}
 	if (ifname_prefix) {
 		os_snprintf(buf, sizeof(buf), "IFNAME=%s %s",
-			    ifname_prefix, cmd);
+			    ifname_prefix, cmd);/*写接口名称*/
 		buf[sizeof(buf) - 1] = '\0';
 		cmd = buf;
 	}
 	len = sizeof(buf) - 1;
+	/*写命令字符串到对端*/
 	ret = wpa_ctrl_request(ctrl, cmd, os_strlen(cmd), buf, &len,
-			       wpa_cli_msg_cb);
+			       wpa_cli_msg_cb/*输出响应内容*/);
 	if (ret == -2) {
 		printf("'%s' command timed out.\n", cmd);
 		return -2;
@@ -261,7 +265,7 @@ static int _wpa_ctrl_command(struct wpa_ctrl *ctrl, const char *cmd, int print)
 }
 
 
-static int wpa_ctrl_command(struct wpa_ctrl *ctrl, const char *cmd)
+static int wpa_ctrl_command(struct wpa_ctrl *ctrl, const char *cmd/*命令字符串*/)
 {
 	return _wpa_ctrl_command(ctrl, cmd, 1);
 }
@@ -277,8 +281,11 @@ static int wpa_cli_cmd(struct wpa_ctrl *ctrl, const char *cmd, int min_args,
 		       min_args > 1 ? "s are" : " is");
 		return -1;
 	}
+
+	/*格式化buffer*/
 	if (write_cmd(buf, sizeof(buf), cmd, argc, argv) < 0)
 		return -1;
+	/*执行ctrl命令*/
 	return wpa_ctrl_command(ctrl, buf);
 }
 
@@ -377,6 +384,7 @@ static int wpa_cli_mesh_cmd_pmksa_add(struct wpa_ctrl *ctrl, int argc,
 
 static int wpa_cli_cmd_help(struct wpa_ctrl *ctrl, int argc, char *argv[])
 {
+	/*显示帮助信息*/
 	print_help(argc > 0 ? argv[0] : NULL);
 	return 0;
 }
@@ -2179,7 +2187,7 @@ static int wpa_cli_cmd_mesh_link_probe(struct wpa_ctrl *ctrl, int argc,
 
 static int wpa_cli_cmd_p2p_find(struct wpa_ctrl *ctrl, int argc, char *argv[])
 {
-	return wpa_cli_cmd(ctrl, "P2P_FIND", 0, argc, argv);
+	return wpa_cli_cmd(ctrl, "P2P_FIND", 0, argc, argv);/*执行p2p_find命令*/
 }
 
 
@@ -3411,6 +3419,7 @@ struct wpa_cli_cmd {
 	const char *usage;
 };
 
+/*wpa cli支持的所有命令*/
 static const struct wpa_cli_cmd wpa_cli_commands[] = {
 	{ "status", wpa_cli_cmd_status, NULL,
 	  cli_cmd_flag_none,
@@ -4184,6 +4193,7 @@ static void print_cmd_help(const struct wpa_cli_cmd *cmd, const char *pad)
 	char c;
 	size_t n;
 
+	/*显示命令帮助*/
 	printf("%s%s ", pad, cmd->cmd);
 	for (n = 0; (c = cmd->usage[n]); n++) {
 		printf("%c", c);
@@ -4193,7 +4203,7 @@ static void print_cmd_help(const struct wpa_cli_cmd *cmd, const char *pad)
 	printf("\n");
 }
 
-
+/*针对具体一个命令显示help信息*/
 static void print_help(const char *cmd)
 {
 	int n;
@@ -4314,7 +4324,7 @@ static char ** wpa_cli_edit_completion_cb(void *ctx, const char *str, int pos)
 	return res;
 }
 
-
+/*执行命令请求*/
 static int wpa_request(struct wpa_ctrl *ctrl, int argc, char *argv[])
 {
 	const struct wpa_cli_cmd *cmd, *match = NULL;
@@ -4322,8 +4332,8 @@ static int wpa_request(struct wpa_ctrl *ctrl, int argc, char *argv[])
 	int ret = 0;
 
 	if (argc > 1 && os_strncasecmp(argv[0], "IFNAME=", 7) == 0) {
-		ifname_prefix = argv[0] + 7;
-		argv = &argv[1];
+		ifname_prefix = argv[0] + 7;/*接口前缀*/
+		argv = &argv[1];/*命令变更为argv1*/
 		argc--;
 	} else
 		ifname_prefix = NULL;
@@ -4332,7 +4342,7 @@ static int wpa_request(struct wpa_ctrl *ctrl, int argc, char *argv[])
 		return -1;
 
 	count = 0;
-	cmd = wpa_cli_commands;
+	cmd = wpa_cli_commands;/*wpa-cli支持的命令行*/
 	while (cmd->cmd) {
 		if (os_strncasecmp(cmd->cmd, argv[0], os_strlen(argv[0])) == 0)
 		{
@@ -4348,6 +4358,7 @@ static int wpa_request(struct wpa_ctrl *ctrl, int argc, char *argv[])
 	}
 
 	if (count > 1) {
+		/*多个匹配，存在歧义*/
 		printf("Ambiguous command '%s'; possible commands:", argv[0]);
 		cmd = wpa_cli_commands;
 		while (cmd->cmd) {
@@ -4363,6 +4374,7 @@ static int wpa_request(struct wpa_ctrl *ctrl, int argc, char *argv[])
 		printf("Unknown command '%s'\n", argv[0]);
 		ret = 1;
 	} else {
+		/*执行命令回调*/
 		ret = match->handler(ctrl, argc - 1, &argv[1]);
 	}
 
@@ -4566,11 +4578,11 @@ static int wpa_cli_open_global_ctrl(void)
 		update_ifnames(ctrl_conn);
 		mon_conn = wpa_ctrl_open(global);
 		if (mon_conn) {
-			if (wpa_ctrl_attach(mon_conn) == 0) {
+			if (wpa_ctrl_attach(mon_conn) == 0) {/*执行attach成功*/
 				wpa_cli_attached = 1;
 				eloop_register_read_sock(
 					wpa_ctrl_get_fd(mon_conn),
-					wpa_cli_mon_receive,
+					wpa_cli_mon_receive,/*monitor fd可读时，容许执行的回调*/
 					NULL, NULL);
 			} else {
 				printf("Failed to open monitor connection through global control interface\n");
@@ -4743,16 +4755,18 @@ static void wpa_cli_ping(void *eloop_ctx, void *timeout_ctx)
 		char *prefix = ifname_prefix;
 
 		ifname_prefix = NULL;
-		res = _wpa_ctrl_command(ctrl_conn, "PING", 0);
+		res = _wpa_ctrl_command(ctrl_conn, "PING", 0);/*发送PING命令*/
 		ifname_prefix = prefix;
 		if (res) {
 			printf("Connection to wpa_supplicant lost - trying to "
 			       "reconnect\n");
-			wpa_cli_close_connection();
+			wpa_cli_close_connection();/*与wpa_supplicant之间连接断开，关闭ctrl_conn*/
 		}
 	}
 	if (!ctrl_conn)
+		/*启动timeout执行重连*/
 		wpa_cli_reconnect();
+	/*再次添加interval*/
 	eloop_register_timeout(ping_interval, 0, wpa_cli_ping, NULL, NULL);
 }
 
@@ -4767,9 +4781,9 @@ static void wpa_cli_edit_cmd_cb(void *ctx, char *cmd)
 {
 	char *argv[max_args];
 	int argc;
-	argc = tokenize_cmd(cmd, argv);
+	argc = tokenize_cmd(cmd, argv);/*拆解参数，返回参数数*/
 	if (argc)
-		wpa_request(ctrl_conn, argc, argv);
+		wpa_request(ctrl_conn, argc, argv);/*执行命令请求*/
 }
 
 
@@ -4802,17 +4816,19 @@ static void start_edit(void)
 		int hfile_len = os_strlen(home) + 1 + os_strlen(fname) + 1;
 		hfile = os_malloc(hfile_len);
 		if (hfile)
+			/*构造wap_cli的命令历吏记录*/
 			os_snprintf(hfile, hfile_len, "%s/%s", home, fname);
 	}
 
+	/*注册cmd执行回调，eof执行回调*/
 	if (edit_init(wpa_cli_edit_cmd_cb, wpa_cli_edit_eof_cb,
-		      wpa_cli_edit_completion_cb, NULL, hfile, ps) < 0) {
+		      wpa_cli_edit_completion_cb, NULL, hfile, ps/*命令提示符*/) < 0) {
 		eloop_terminate();
 		return;
 	}
 
-	edit_started = 1;
-	eloop_register_timeout(ping_interval, 0, wpa_cli_ping, NULL, NULL);
+	edit_started = 1;/*标记edit已初始化完成*/
+	eloop_register_timeout(ping_interval/*触发间隔*/, 0, wpa_cli_ping/*与wpa之间保活*/, NULL, NULL);
 }
 
 
@@ -4825,17 +4841,19 @@ static void update_bssid_list(struct wpa_ctrl *ctrl)
 	char *pos, *end;
 
 	if (ctrl == NULL)
-		return;
-	ret = wpa_ctrl_request(ctrl, cmd, os_strlen(cmd), buf, &len, NULL);
+		return;/*ctrl未建立，则直接返回*/
+	/*发送请求，并读取响应*/
+	ret = wpa_ctrl_request(ctrl, cmd, os_strlen(cmd), buf/*响应内容*/, &len, NULL);
 	if (ret < 0)
 		return;
 	buf[len] = '\0';
 
+	/*解析响应内容*/
 	pos = buf;
 	while (pos) {
 		pos = os_strstr(pos, "bssid=");
 		if (pos == NULL)
-			break;
+			break;/*不包含bss,直接退出*/
 		pos += 6;
 		end = os_strchr(pos, '\n');
 		if (end == NULL)
@@ -4892,6 +4910,7 @@ static void update_creds(struct wpa_ctrl *ctrl)
 
 	if (ctrl == NULL)
 		return;
+	/*请求creds*/
 	ret = wpa_ctrl_request(ctrl, cmd, os_strlen(cmd), buf, &len, NULL);
 	if (ret < 0)
 		return;
@@ -4904,7 +4923,7 @@ static void update_creds(struct wpa_ctrl *ctrl)
 			break;
 		*end = '\0';
 		if (!header)
-			cli_txt_list_add_word(&creds, pos, '\t');
+			cli_txt_list_add_word(&creds, pos, '\t');/*解析并挂接creds*/
 		header = 0;
 		pos = end + 1;
 	}
@@ -4920,10 +4939,11 @@ static void update_networks(struct wpa_ctrl *ctrl)
 	char *pos, *end;
 	int header = 1;
 
-	cli_txt_list_flush(&networks);
+	cli_txt_list_flush(&networks);/*丢掉以前记录的所有network*/
 
 	if (ctrl == NULL)
 		return;
+	/*发送请求*/
 	ret = wpa_ctrl_request(ctrl, cmd, os_strlen(cmd), buf, &len, NULL);
 	if (ret < 0)
 		return;
@@ -4931,12 +4951,12 @@ static void update_networks(struct wpa_ctrl *ctrl)
 
 	pos = buf;
 	while (pos) {
-		end = os_strchr(pos, '\n');
+		end = os_strchr(pos, '\n');/*按行划分network*/
 		if (end == NULL)
 			break;
 		*end = '\0';
 		if (!header)
-			cli_txt_list_add_word(&networks, pos, '\t');
+			cli_txt_list_add_word(&networks, pos, '\t');/*记录列出的network*/
 		header = 0;
 		pos = end + 1;
 	}
@@ -4951,15 +4971,16 @@ static void update_stations(struct wpa_ctrl *ctrl)
 	if (!ctrl || !interactive)
 		return;
 
-	cli_txt_list_flush(&stations);
+	cli_txt_list_flush(&stations);/*丢掉以前记录的所有station*/
 
+	/*发送首个请求*/
 	if (wpa_ctrl_command_sta(ctrl, "STA-FIRST", addr, sizeof(addr), 0))
 		return;
 	do {
 		if (os_strcmp(addr, "") != 0)
-			cli_txt_list_add(&stations, addr);
+			cli_txt_list_add(&stations, addr);/*记录获得的station地址*/
 		os_snprintf(cmd, sizeof(cmd), "STA-NEXT %s", addr);
-	} while (wpa_ctrl_command_sta(ctrl, cmd, addr, sizeof(addr), 0) == 0);
+	} while (wpa_ctrl_command_sta(ctrl, cmd, addr, sizeof(addr), 0)/*发送next请求*/ == 0);
 #endif /* CONFIG_AP */
 }
 
@@ -4967,24 +4988,26 @@ static void update_stations(struct wpa_ctrl *ctrl)
 static void try_connection(void *eloop_ctx, void *timeout_ctx)
 {
 	if (ctrl_conn)
-		goto done;
+		goto done;/*ctrl_conn已连接成功，本函数无须再执行*/
 
 	if (ctrl_ifname == NULL)
-		ctrl_ifname = wpa_cli_get_default_ifname();
+		ctrl_ifname = wpa_cli_get_default_ifname();/*未设置ctrl_ifname,使用默认的*/
 
 	if (wpa_cli_open_connection(ctrl_ifname, 1)) {
+		/*连接失败，还未显示告警，显示并重置定时器1S后触发*/
 		if (!warning_displayed) {
 			printf("Could not connect to wpa_supplicant: "
 			       "%s - re-trying\n",
 			       ctrl_ifname ? ctrl_ifname : "(nil)");
 			warning_displayed = 1;
 		}
+		/*设置重连定时器，一秒后触发*/
 		eloop_register_timeout(1, 0, try_connection, NULL, NULL);
 		return;
 	}
 
-	update_bssid_list(ctrl_conn);
-	update_creds(ctrl_conn);
+	update_bssid_list(ctrl_conn);/*请求并记录bssid*/
+	update_creds(ctrl_conn);/*请求并记录creds*/
 	update_networks(ctrl_conn);
 	update_stations(ctrl_conn);
 
@@ -4992,7 +5015,7 @@ static void try_connection(void *eloop_ctx, void *timeout_ctx)
 		printf("Connection established.\n");
 
 done:
-	start_edit();
+	start_edit();/*启动edit*/
 }
 
 
@@ -5000,8 +5023,9 @@ static void wpa_cli_interactive(void)
 {
 	printf("\nInteractive mode\n\n");
 
+	/*注册定时器,要求立即超时*/
 	eloop_register_timeout(0, 0, try_connection, NULL, NULL);
-	eloop_run();
+	eloop_run();/*进入event loop，退出时程序就会退出*/
 	eloop_cancel_timeout(try_connection, NULL, NULL);
 
 	cli_txt_list_flush(&p2p_peers);
@@ -5077,8 +5101,9 @@ static void wpa_cli_cleanup(void)
 
 static void wpa_cli_terminate(int sig, void *ctx)
 {
-	eloop_terminate();
+	eloop_terminate();/*指明loop需要退出*/
 	if (reconnect)
+		/*如果“重连”开关被打开，指明cli需要退出*/
 		wpa_cli_quit = 1;
 }
 
@@ -5096,6 +5121,7 @@ static char * wpa_cli_get_default_ifname(void)
 #else /* ANDROID */
 #ifdef CONFIG_CTRL_IFACE_UNIX
 	struct dirent *dent;
+	/*打开hostapd提供的ctrl iface目录*/
 	DIR *dir = opendir(ctrl_iface_dir);
 	if (!dir) {
 		return NULL;
@@ -5206,6 +5232,7 @@ int main(int argc, char *argv[])
 
 	interactive = (argc == optind) && (action_file == NULL);
 
+	/*采用交互模式*/
 	if (interactive)
 		printf("%s\n\n%s\n\n", wpa_cli_version, cli_license);
 
@@ -5215,13 +5242,14 @@ int main(int argc, char *argv[])
 	if (global && wpa_cli_open_global_ctrl() < 0)
 		return -1;
 
+	/*注册SIGINT,SIGTRM信号处理*/
 	eloop_register_signal_terminate(wpa_cli_terminate, NULL);
 
 	if (!ctrl_ifname && !global)
 		ctrl_ifname = wpa_cli_get_default_ifname();
 
 	if (reconnect && action_file && ctrl_ifname) {
-		while (!wpa_cli_quit) {
+		while (!wpa_cli_quit/*重连开关被打开后，此变量控制进程退出*/) {
 			if (ctrl_conn)
 				wpa_cli_action(ctrl_conn);
 			else
@@ -5236,6 +5264,7 @@ int main(int argc, char *argv[])
 			}
 		}
 	} else if (interactive) {
+		/*交互方式*/
 		wpa_cli_interactive();
 	} else {
 		if (!global &&

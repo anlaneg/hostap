@@ -367,6 +367,7 @@ int os_program_init(void)
 	capset(&header, &cap);
 #endif /* ANDROID */
 
+	/*初始化随机数*/
 	if (os_get_random((unsigned char *) &seed, sizeof(seed)) == 0)
 		srandom(seed);
 

@@ -378,6 +378,7 @@ int wpa_driver_nl80211_scan(struct i802_bss *bss,
 	if (TEST_FAIL())
 		return -1;
 
+	/*准备扫描消息*/
 	msg = nl80211_scan_common(bss, NL80211_CMD_TRIGGER_SCAN, params);
 	if (!msg)
 		return -1;
@@ -421,7 +422,7 @@ int wpa_driver_nl80211_scan(struct i802_bss *bss,
 			goto fail;
 	}
 
-	ret = send_and_recv_cmd(drv, msg);
+	ret = send_and_recv_cmd(drv, msg);/*向kernel发送扫描消息*/
 	msg = NULL;
 	if (ret) {
 		wpa_printf(MSG_DEBUG, "nl80211: Scan trigger failed: ret=%d "

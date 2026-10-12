@@ -119,6 +119,7 @@ static inline int wpa_drv_scan(struct wpa_supplicant *wpa_s,
 		return -EBUSY;
 #endif /* CONFIG_TESTING_OPTIONS */
 	if (wpa_s->driver->scan2)
+		/*执行驱动扫描，比如driver_nl80211_scan2*/
 		return wpa_s->driver->scan2(wpa_s->drv_priv, params);
 	return -1;
 }

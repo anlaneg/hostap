@@ -207,7 +207,7 @@ int get_cmd_arg_num(const char *str, int pos)
 	return arg;
 }
 
-
+/*将命令格式为buffer*/
 int write_cmd(char *buf, size_t buflen, const char *cmd, int argc, char *argv[])
 {
 	int i, res;
@@ -245,23 +245,25 @@ int tokenize_cmd(char *cmd, char *argv[])
 	pos = cmd;
 	for (;;) {
 		while (*pos == ' ')
-			pos++;
+			pos++;/*跳过前导的空格*/
 		if (*pos == '\0')
-			break;
-		argv[argc] = pos;
-		argc++;
+			break;/*达到输入结尾*/
+		argv[argc] = pos;/*记录参数起点*/
+		argc++;/*参数增加*/
 		if (argc == max_args)
-			break;
+			break;/*参数达到最大值，退出循环*/
 		if (*pos == '"') {
+			/*遇到字符串起始符，向后查找,由于当前正指向'"',
+			 * 故这里希望采用strrchr来查找最后一个出现的？（但这样有问题）*/
 			char *pos2 = os_strrchr(pos, '"');
 			if (pos2)
-				pos = pos2 + 1;
+				pos = pos2 + 1;/*跳过'"'*/
 		}
 		while (*pos != '\0' && *pos != ' ')
-			pos++;
+			pos++;/*直到遇到分隔符*/
 		if (*pos == ' ')
-			*pos++ = '\0';
+			*pos++ = '\0';/*断开字符串，使之成为一个参数*/
 	}
 
-	return argc;
+	return argc;/*返回参数数目*/
 }

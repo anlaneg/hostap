@@ -215,6 +215,7 @@ static inline u16 WPA_GET_BE16(const u8 *a)
 	return (a[0] << 8) | a[1];
 }
 
+/*按大端存放*/
 static inline void WPA_PUT_BE16(u8 *a, u16 val)
 {
 	a[0] = val >> 8;

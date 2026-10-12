@@ -143,7 +143,7 @@ static void wpa_supplicant_ctrl_iface_receive(int sock, void *eloop_ctx,
 	if (!buf)
 		return;
 	res = recvfrom(sock, buf, CTRL_IFACE_MAX_LEN + 1, 0,
-		       (struct sockaddr *) &from, &fromlen);
+		       (struct sockaddr *) &from, &fromlen);/*读取内容*/
 	if (res < 0) {
 		wpa_printf(MSG_ERROR, "recvfrom(ctrl_iface): %s",
 			   strerror(errno));
@@ -151,6 +151,7 @@ static void wpa_supplicant_ctrl_iface_receive(int sock, void *eloop_ctx,
 		return;
 	}
 	if ((size_t) res > CTRL_IFACE_MAX_LEN) {
+		/*内容过长*/
 		wpa_printf(MSG_ERROR, "recvform(ctrl_iface): input truncated");
 		os_free(buf);
 		return;
@@ -158,6 +159,7 @@ static void wpa_supplicant_ctrl_iface_receive(int sock, void *eloop_ctx,
 	buf[res] = '\0';
 
 	if (os_strcmp(buf, "ATTACH") == 0) {
+		/*执行attach请求*/
 		if (wpa_supplicant_ctrl_iface_attach(&priv->ctrl_dst, &from,
 						     fromlen, 0))
 			reply_len = 1;
@@ -166,18 +168,21 @@ static void wpa_supplicant_ctrl_iface_receive(int sock, void *eloop_ctx,
 			reply_len = 2;
 		}
 	} else if (os_strcmp(buf, "DETACH") == 0) {
+		/*执行detach请求*/
 		if (wpa_supplicant_ctrl_iface_detach(&priv->ctrl_dst, &from,
 						     fromlen))
 			reply_len = 1;
 		else
 			reply_len = 2;
 	} else if (os_strncmp(buf, "LEVEL ", 6) == 0) {
+		/*执行level请求*/
 		if (wpa_supplicant_ctrl_iface_level(priv, &from, fromlen,
 						    buf + 6))
 			reply_len = 1;
 		else
 			reply_len = 2;
 	} else {
+		/*执行其它请求*/
 		sockaddr_print(wpas_ctrl_cmd_debug_level(buf),
 			       "Control interface recv command from:",
 			       &from, fromlen);

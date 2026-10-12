@@ -359,7 +359,7 @@ void wpas_p2p_scan_freqs(struct wpa_supplicant *wpa_s,
 					params, true, true, false);
 }
 
-
+/*负责p2p scan工作*/
 static void wpas_p2p_trigger_scan_cb(struct wpa_radio_work *work, int deinit)
 {
 	struct wpa_supplicant *wpa_s = work->wpa_s;
@@ -367,6 +367,7 @@ static void wpas_p2p_trigger_scan_cb(struct wpa_radio_work *work, int deinit)
 	int ret;
 
 	if (deinit) {
+		/*释放处理*/
 		if (!work->started) {
 			wpa_scan_free_params(params);
 			return;
@@ -385,7 +386,7 @@ static void wpas_p2p_trigger_scan_cb(struct wpa_radio_work *work, int deinit)
 	if (!params->freqs)
 		wpas_p2p_scan_freqs(wpa_s, params, params->p2p_include_6ghz);
 
-	ret = wpa_drv_scan(wpa_s, params);
+	ret = wpa_drv_scan(wpa_s, params);/*执行驱动扫描*/
 	if (ret == 0)
 		wpa_s->curr_scan_cookie = params->scan_cookie;
 	wpa_scan_free_params(params);
@@ -458,6 +459,7 @@ static int wpas_p2p_scan(void *ctx, enum p2p_scan_type type, int freq,
 	params->ssids[0].ssid_len = P2P_WILDCARD_SSID_LEN;
 
 	wpa_s->wps->dev.p2p = 1;
+	/*构造消息*/
 	wps_ie = wps_build_probe_req_ie(pw_id, &wpa_s->wps->dev,
 					wpa_s->wps->uuid, WPS_REQ_ENROLLEE,
 					num_req_dev_types, req_dev_types);
@@ -522,7 +524,7 @@ static int wpas_p2p_scan(void *ctx, enum p2p_scan_type type, int freq,
 	wpabuf_free(wps_ie);
 
 	bands = wpas_get_bands(wpa_s, params->freqs);
-	p2p_scan_ie(wpa_s->global->p2p, ies, dev_id, bands);
+	p2p_scan_ie(wpa_s->global->p2p, ies, dev_id, bands);/*继续添加消息参数*/
 
 	params->p2p_probe = 1;
 	n = os_malloc(wpabuf_len(ies));
@@ -531,11 +533,12 @@ static int wpas_p2p_scan(void *ctx, enum p2p_scan_type type, int freq,
 		goto fail;
 	}
 	os_memcpy(n, wpabuf_head(ies), wpabuf_len(ies));
-	params->extra_ies = n;
+	params->extra_ies = n;/*指明消息*/
 	params->extra_ies_len = wpabuf_len(ies);
 	wpabuf_free(ies);
 
 	radio_remove_works(wpa_s, "p2p-scan", 0);
+	/*添加p2p-scan work*/
 	if (radio_add_work(wpa_s, 0, "p2p-scan", 0, wpas_p2p_trigger_scan_cb,
 			   params) < 0)
 		goto fail;
@@ -8693,7 +8696,7 @@ int wpas_p2p_find(struct wpa_supplicant *wpa_s, unsigned int timeout,
 		return -1;
 	}
 
-	wpa_supplicant_cancel_sched_scan(wpa_s);
+	wpa_supplicant_cancel_sched_scan(wpa_s);/*取消scan*/
 
 	return p2p_find(wpa_s->global->p2p, timeout, type,
 			num_req_dev_types, req_dev_types, dev_id,

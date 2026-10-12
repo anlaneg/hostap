@@ -7302,6 +7302,7 @@ static void radio_start_next_work(void *eloop_ctx, void *timeout_ctx)
 	struct os_reltime now, diff;
 	struct wpa_supplicant *wpa_s;
 
+	/*取首个work*/
 	work = dl_list_first(&radio->work, struct wpa_radio_work, list);
 	if (work == NULL) {
 		radio->num_active_works = 0;
@@ -7340,7 +7341,7 @@ static void radio_start_next_work(void *eloop_ctx, void *timeout_ctx)
 	work->time = now;
 	radio->num_active_works++;
 
-	work->cb(work, 0);
+	work->cb(work, 0);/*执行work回调函数*/
 
 	if ((wpa_s->drv_flags & WPA_DRIVER_FLAGS_OFFCHANNEL_SIMULTANEOUS) &&
 	    radio->num_active_works < MAX_ACTIVE_WORKS)
@@ -7493,8 +7494,8 @@ void radio_work_check_next(struct wpa_supplicant *wpa_s)
  * requires exclusive control of the radio.
  */
 int radio_add_work(struct wpa_supplicant *wpa_s, unsigned int freq,
-		   const char *type, int next,
-		   void (*cb)(struct wpa_radio_work *work, int deinit),
+		   const char *type/*work类型*/, int next,
+		   void (*cb/*work执行回调*/)(struct wpa_radio_work *work, int deinit),
 		   void *ctx)
 {
 	struct wpa_radio *radio = wpa_s->radio;
@@ -7509,7 +7510,7 @@ int radio_add_work(struct wpa_supplicant *wpa_s, unsigned int freq,
 	work->freq = freq;
 	work->type = type;
 	work->wpa_s = wpa_s;
-	work->cb = cb;
+	work->cb = cb;/*work工作函数*/
 	work->ctx = ctx;
 
 	if (freq)
@@ -7524,7 +7525,7 @@ int radio_add_work(struct wpa_supplicant *wpa_s, unsigned int freq,
 
 	was_empty = dl_list_empty(&wpa_s->radio->work);
 	if (next)
-		dl_list_add(&wpa_s->radio->work, &work->list);
+		dl_list_add(&wpa_s->radio->work, &work->list);/*添加work到wpa_s->radio->work*/
 	else
 		dl_list_add_tail(&wpa_s->radio->work, &work->list);
 	if (was_empty) {

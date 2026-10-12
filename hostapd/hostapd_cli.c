@@ -210,7 +210,7 @@ static int _wpa_ctrl_command(struct wpa_ctrl *ctrl, const char *cmd, int print)
 	}
 	len = sizeof(buf) - 1;
 	ret = wpa_ctrl_request(ctrl, cmd, strlen(cmd), buf, &len,
-			       hostapd_cli_msg_cb);
+			       hostapd_cli_msg_cb/*响应处理回调*/);/*发送控制命令*/
 	if (ret == -2) {
 		printf("'%s' command timed out.\n", cmd);
 		return -2;
@@ -813,6 +813,7 @@ static int hostapd_cli_cmd_list_sta(struct wpa_ctrl *ctrl, int argc,
 
 static int hostapd_cli_cmd_help(struct wpa_ctrl *ctrl, int argc, char *argv[])
 {
+	/*显示帮助信息*/
 	print_help(stdout, argc > 0 ? argv[0] : NULL);
 	return 0;
 }
@@ -1676,6 +1677,7 @@ struct hostapd_cli_cmd {
 	const char *usage;
 };
 
+/*hostapd cli支持的命令*/
 static const struct hostapd_cli_cmd hostapd_cli_commands[] = {
 	{ "ping", hostapd_cli_cmd_ping, NULL,
 	  "= pings hostapd" },
@@ -1742,7 +1744,7 @@ static const struct hostapd_cli_cmd hostapd_cli_commands[] = {
 	{ "get_config", hostapd_cli_cmd_get_config, NULL,
 	  "= show current configuration" },
 	{ "help", hostapd_cli_cmd_help, hostapd_cli_complete_help,
-	  "= show this usage help" },
+	  "= show this usage help" },/*执行cmd帮助命令*/
 	{ "interface", hostapd_cli_cmd_interface, hostapd_complete_interface,
 	  "[ifname] = show interfaces/select interface" },
 #ifdef CONFIG_FST
@@ -1911,6 +1913,7 @@ static const struct hostapd_cli_cmd hostapd_cli_commands[] = {
 static void print_cmd_help(FILE *stream, const struct hostapd_cli_cmd *cmd,
 			   const char *pad)
 {
+	/*显示命令的帮助信息*/
 	char c;
 	size_t n;
 
@@ -1946,7 +1949,8 @@ static void wpa_request(struct wpa_ctrl *ctrl, int argc, char *argv[])
 	count = 0;
 	cmd = hostapd_cli_commands;
 	while (cmd->cmd) {
-		if (strncasecmp(cmd->cmd, argv[0], strlen(argv[0])) == 0) {
+		/*检查是否匹配命令*/
+		if (strncasecmp(cmd->cmd, argv[0]/*第一个值为命令字*/, strlen(argv[0])) == 0) {
 			match = cmd;
 			if (os_strcasecmp(cmd->cmd, argv[0]) == 0) {
 				/* we have an exact match */
@@ -1959,19 +1963,22 @@ static void wpa_request(struct wpa_ctrl *ctrl, int argc, char *argv[])
 	}
 
 	if (count > 1) {
+		/*多个命令前缀均匹配了此cmd输出*/
 		printf("Ambiguous command '%s'; possible commands:", argv[0]);
 		cmd = hostapd_cli_commands;
 		while (cmd->cmd) {
 			if (strncasecmp(cmd->cmd, argv[0], strlen(argv[0])) ==
 			    0) {
-				printf(" %s", cmd->cmd);
+				printf(" %s", cmd->cmd);/*显示匹配的所有命令*/
 			}
 			cmd++;
 		}
 		printf("\n");
 	} else if (count == 0) {
+		/*没有匹配到任何command*/
 		printf("Unknown command '%s'\n", argv[0]);
 	} else {
+		/*执行命令对应的handler*/
 		match->handler(ctrl, argc - 1, &argv[1]);
 	}
 }
@@ -1988,6 +1995,7 @@ static void cli_event(const char *str)
 	start++;
 
 	if (str_starts(start, AP_STA_CONNECTED)) {
+		/*station添加*/
 		s = os_strchr(start, ' ');
 		if (s == NULL)
 			return;
@@ -1996,6 +2004,7 @@ static void cli_event(const char *str)
 	}
 
 	if (str_starts(start, AP_STA_DISCONNECTED)) {
+		/*station删除*/
 		s = os_strchr(start, ' ');
 		if (s == NULL)
 			return;

@@ -372,7 +372,7 @@ static inline bool external_scan_running(struct wpa_radio *radio)
  * struct wpa_radio_work - Radio work item
  */
 struct wpa_radio_work {
-	struct dl_list list;
+	struct dl_list list;/*用于挂接work到wpa_s->radio->work*/
 	unsigned int freq; /* known frequency (MHz) or 0 for multiple/unknown */
 	const char *type;
 	struct wpa_supplicant *wpa_s;

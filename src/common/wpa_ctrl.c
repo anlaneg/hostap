@@ -109,12 +109,12 @@ struct wpa_ctrl * wpa_ctrl_open2(const char *ctrl_path,
 		return NULL;
 
 	ctrl->s = socket(PF_UNIX, SOCK_DGRAM, 0);
-	if (ctrl->s < 0) {
+	if (ctrl->s < 0) {/*创建unix socket失败*/
 		os_free(ctrl);
 		return NULL;
 	}
 
-	ctrl->local.sun_family = AF_UNIX;
+	ctrl->local.sun_family = AF_UNIX;/*本机地址采用unix socket*/
 	counter++;
 try_again:
 	if (cli_path && cli_path[0] == '/') {
@@ -127,10 +127,10 @@ try_again:
 				  sizeof(ctrl->local.sun_path),
 				  CONFIG_CTRL_IFACE_CLIENT_DIR "/"
 				  CONFIG_CTRL_IFACE_CLIENT_PREFIX "%d-%d",
-				  (int) getpid(), counter);
+				  (int) getpid(), counter);/*设置local地址*/
 	}
 	if (os_snprintf_error(sizeof(ctrl->local.sun_path), ret)) {
-		close(ctrl->s);
+		close(ctrl->s);/*地址长度有误*/
 		os_free(ctrl);
 		return NULL;
 	}
@@ -149,7 +149,7 @@ try_again:
 	fchmod(ctrl->s, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 #endif /* ANDROID */
 	if (bind(ctrl->s, (struct sockaddr *) &ctrl->local,
-		    sizeof(ctrl->local)) < 0) {
+		    sizeof(ctrl->local)) < 0) {/*本地绑定地址*/
 		if (errno == EADDRINUSE && tries < 2) {
 			/*
 			 * getpid() returns unique identifier for this instance
@@ -205,20 +205,21 @@ try_again:
 	}
 #endif /* ANDROID */
 
-	ctrl->dest.sun_family = AF_UNIX;
+	ctrl->dest.sun_family = AF_UNIX;/*目的地址也为unix socet*/
 	if (os_strncmp(ctrl_path, "@abstract:", 10) == 0) {
 		ctrl->dest.sun_path[0] = '\0';
 		os_strlcpy(ctrl->dest.sun_path + 1, ctrl_path + 10,
 			   sizeof(ctrl->dest.sun_path) - 1);
 	} else {
 		res = os_strlcpy(ctrl->dest.sun_path, ctrl_path,
-				 sizeof(ctrl->dest.sun_path));
+				 sizeof(ctrl->dest.sun_path));/*使用ctrl_path做为dst addr*/
 		if (res >= sizeof(ctrl->dest.sun_path)) {
 			close(ctrl->s);
 			os_free(ctrl);
 			return NULL;
 		}
 	}
+	/*连接到目的地址*/
 	if (connect(ctrl->s, (struct sockaddr *) &ctrl->dest,
 		    sizeof(ctrl->dest)) < 0) {
 		close(ctrl->s);
@@ -233,6 +234,7 @@ try_again:
 	 */
 	flags = fcntl(ctrl->s, F_GETFL);
 	if (flags >= 0) {
+		/*设置非阻塞*/
 		flags |= O_NONBLOCK;
 		if (fcntl(ctrl->s, F_SETFL, flags) < 0) {
 			perror("fcntl(ctrl->s, O_NONBLOCK)");
@@ -478,9 +480,9 @@ void wpa_ctrl_close(struct wpa_ctrl *ctrl)
 
 
 #ifdef CTRL_IFACE_SOCKET
-int wpa_ctrl_request(struct wpa_ctrl *ctrl, const char *cmd, size_t cmd_len,
-		     char *reply, size_t *reply_len,
-		     void (*msg_cb)(char *msg, size_t len))
+int wpa_ctrl_request(struct wpa_ctrl *ctrl, const char *cmd/*请求的命令*/, size_t cmd_len,
+		     char *reply/*响应内容*/, size_t *reply_len,
+		     void (*msg_cb/*响应消息处理*/)(char *msg, size_t len))
 {
 	struct timeval tv;
 	struct os_reltime started_at, ending_at;
@@ -514,7 +516,7 @@ int wpa_ctrl_request(struct wpa_ctrl *ctrl, const char *cmd, size_t cmd_len,
 	started_at.sec = 0;
 	started_at.usec = 0;
 retry_send:
-	if (send(ctrl->s, _cmd, _cmd_len, 0) < 0) {
+	if (send(ctrl->s, _cmd, _cmd_len, 0) < 0) {/*向对端发送命令*/
 		if (errno == EAGAIN || errno == EBUSY || errno == EWOULDBLOCK)
 		{
 			/*
@@ -553,18 +555,18 @@ retry_send:
 		tv.tv_usec = diff.usec;
 
 		FD_ZERO(&rfds);
-		FD_SET(ctrl->s, &rfds);
+		FD_SET(ctrl->s, &rfds);/*准备收取响应*/
 		res = select(ctrl->s + 1, &rfds, NULL, NULL, &tv);
 		if (res < 0 && errno == EINTR)
 			continue;
 		if (res < 0)
 			return res;
 		if (FD_ISSET(ctrl->s, &rfds)) {
-			res = recv(ctrl->s, reply, *reply_len, 0);
+			res = recv(ctrl->s, reply, *reply_len, 0);/*收取响应*/
 			if (res < 0)
 				return res;
 			if ((res > 0 && reply[0] == '<') ||
-			    (res > 6 && strncmp(reply, "IFNAME=", 7) == 0)) {
+			    (res > 6 && strncmp(reply, "IFNAME=", 7) == 0)) {/*响应中有“IFNAME=”*/
 				/* This is an unsolicited message from
 				 * wpa_supplicant, not the reply to the
 				 * request. Use msg_cb to report this to the
@@ -574,8 +576,8 @@ retry_send:
 					 * terminated. */
 					if ((size_t) res == *reply_len)
 						res = (*reply_len) - 1;
-					reply[res] = '\0';
-					msg_cb(reply, res);
+					reply[res] = '\0';/*设置响应内容结尾*/
+					msg_cb(reply, res);/*执行响应回调*/
 				}
 				continue;
 			}
@@ -596,10 +598,12 @@ static int wpa_ctrl_attach_helper(struct wpa_ctrl *ctrl, int attach)
 	int ret;
 	size_t len = 10;
 
+	/*如为attac,则发送attach请求，否则发送detach请求*/
 	ret = wpa_ctrl_request(ctrl, attach ? "ATTACH" : "DETACH", 6,
 			       buf, &len, NULL);
 	if (ret < 0)
 		return ret;
+	/*响应内容为"OK\n"时，attach或detach成功*/
 	if (len == 3 && os_memcmp(buf, "OK\n", 3) == 0)
 		return 0;
 	return -1;
@@ -608,12 +612,14 @@ static int wpa_ctrl_attach_helper(struct wpa_ctrl *ctrl, int attach)
 
 int wpa_ctrl_attach(struct wpa_ctrl *ctrl)
 {
+	/*执行attach*/
 	return wpa_ctrl_attach_helper(ctrl, 1);
 }
 
 
 int wpa_ctrl_detach(struct wpa_ctrl *ctrl)
 {
+	/*执行detach*/
 	return wpa_ctrl_attach_helper(ctrl, 0);
 }
 
@@ -728,7 +734,7 @@ void wpa_ctrl_close(struct wpa_ctrl *ctrl)
 }
 
 
-int wpa_ctrl_request(struct wpa_ctrl *ctrl, const char *cmd, size_t cmd_len,
+int wpa_ctrl_request(struct wpa_ctrl *ctrl, const char *cmd/*请求命令*/, size_t cmd_len,
 		     char *reply, size_t *reply_len,
 		     void (*msg_cb)(char *msg, size_t len))
 {
